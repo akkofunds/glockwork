@@ -2,7 +2,7 @@
 // resolves spawn / bombsite configuration (auto-guess + per-map overrides), live marker helpers,
 // and renders a top-down radar image.
 import * as THREE from 'three';
-import { CollisionWorld } from './collision.js';
+import { CollisionWorld, lowestFloor } from './collision.js';
 import { buildDunewatch } from './arena.js';
 import { makeTextures } from './textures.js';
 import { parseGLB, adaptMaterial, hashBytes } from '../assets.js';
@@ -28,25 +28,7 @@ function spawnRing(c, yaw, world) {
   return pts;
 }
 
-// Lowest floor under (x,z) with standing room above it (skips roofs and overhangs).
-// Lowest floor under (x,z) with standing room above it (skips roofs and overhangs).
-// openSky: also require a clear view of the sky (avoids spawning inside props, nooks or sealed rooms).
-export function lowestFloor(world, x, top, z, bottom, openSky = false) {
-  let y = top, best = null;
-  const hit = {};
-  for (let i = 0; i < 24 && y > bottom; i++) {
-    const t = world.raycast(x, y, z, 0, -1, 0, y - bottom, hit);
-    if (t === Infinity) break;
-    const fy = y - t;
-    if (hit.ny > 0.7 && !world.capsuleOverlaps(x, fy + 1, z, 72, 16)) {
-      const sky = !openSky || world.raycast(x, fy + 80, z, 0, 1, 0, Math.max(10, top - fy), null) === Infinity;
-      const room = !openSky || [0, 1, 2, 3].every((k) => world.raycast(x, fy + 40, z, Math.cos(k * 1.5708), 0, Math.sin(k * 1.5708), 120, null) === Infinity || false) || sky;
-      if (sky && room) best = fy;
-    }
-    y = fy - 2;
-  }
-  return best;
-}
+export { lowestFloor };
 
 export function finalizeConfig(base, world) {
   const cfg = JSON.parse(JSON.stringify(base));

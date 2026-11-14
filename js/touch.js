@@ -5,7 +5,7 @@ export class TouchControls {
   constructor(root, onAction) {
     this.root = root;
     this.onAction = onAction;
-    this.state = { fm: 0, sm: 0, fire: false, alt: false, duck: false, walk: false, reload: false, use: false, drop: false, jumpAt: -1e9 };
+    this.state = { fm: 0, sm: 0, fire: false, alt: false, duck: false, walk: false, reload: false, use: false, drop: false, jumpHeld: false, jumpAt: -1e9 };
     this.lookDX = 0; this.lookDY = 0;
     this.sens = 1;
     this.stick = null; this.look = new Map();
@@ -48,7 +48,7 @@ export class TouchControls {
     this.fireBtn = this._btn('FIRE', 'fire', () => { s.fire = true; }, () => { s.fire = false; });
     this.fireBtn2 = this._btn('FIRE', 'fire2', () => { s.fire = true; }, () => { s.fire = false; });
     this._btn('AIM', 'alt', () => { s.alt = true; }, () => { s.alt = false; });
-    this._btn('JUMP', 'jump', () => { s.jumpAt = performance.now(); });
+    this._btn('JUMP', 'jump', () => { s.jumpAt = performance.now(); s.jumpHeld = true; }, () => { s.jumpHeld = false; });
     this.duckBtn = this._btn('DUCK', 'duck', () => { s.duck = !s.duck; this.duckBtn.classList.toggle('latched', s.duck); });
     this._btn('R', 'reload', () => { s.reload = true; }, () => { s.reload = false; });
     this._btn('USE', 'use', () => { s.use = true; }, () => { s.use = false; });

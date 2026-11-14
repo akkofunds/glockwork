@@ -126,6 +126,7 @@ export class GameClient {
   async _onWelcome(m) {
     this.num = m.num;
     this.mode = m.mode;
+    this.rules = m.rules || 'defusal';
     for (const r of m.roster) this.roster.set(r.num, r);
     this.app.showLoading('Loading map…');
     try {
@@ -228,7 +229,7 @@ export class GameClient {
     const ph = this.phase;
     const c = this.ctx, r = this.ctxReplay;
     c.frozen = r.frozen = ph === PHASE.FREEZE;
-    c.noAttack = r.noAttack = !(ph === PHASE.LIVE || ph === PHASE.POST || ph === PHASE.PRACTICE || ph === PHASE.FREEZE);
+    c.noAttack = r.noAttack = !(ph === PHASE.LIVE || ph === PHASE.POST || ph === PHASE.PRACTICE || ph === PHASE.FREEZE || ph === PHASE.TDM);
   }
 
   // ---------------- local actions ----------------
@@ -332,6 +333,7 @@ export class GameClient {
       case 'spawn': this.yaw = e.yaw; this.pitch = 0; break;
       case 'warmup': hud.banner('<b>WARMUP</b><small>Match starts shortly</small>', 'neutral', 3); break;
       case 'matchStart': hud.banner('<b>MATCH STARTED</b><small>First to 7 rounds</small>', 'neutral', 3); break;
+      case 'tdmStart': hud.banner(`<b>TEAM DEATHMATCH</b><small>First team to ${e.limit} kills · buy anywhere with B</small>`, 'neutral', 4); audio.play('roundStart', 0.6); break;
       case 'round': {
         this.myBuys = [];
         this.smokes = [];
@@ -709,7 +711,7 @@ export class GameClient {
     const tick = this.serverTickNow();
     const left = (this.phaseEnd - tick) / TICK_RATE;
     if (this.mode !== 'practice' && (this.phase === PHASE.WAITING || this.phase === PHASE.WARMUP)) {
-      const titles = { private: 'PRIVATE MATCH', '1v1': 'DUEL', '2v2': 'WINGMAN', '5v5': 'COMPETITIVE' };
+      const titles = { private: this.rules === 'tdm' ? 'PRIVATE · TEAM DEATHMATCH' : 'PRIVATE MATCH', '1v1': 'DUEL', '2v2': 'WINGMAN', '5v5': 'COMPETITIVE', tdm: 'TEAM DEATHMATCH' };
       const list = (t) => [...this.roster.values()].filter((r) => r.team === t).map((r) => ({ name: r.name, me: r.num === this.num, ready: r.num === this.num || this.remotes.has(r.num) }));
       hud.versus({ mode: titles[this.mode] || this.mode, map: (this.cfg?.name || 'Map').toUpperCase(), ct: list(TEAM.CT), t: list(TEAM.T),
         status: this.phase === PHASE.WARMUP ? `Match starts in ${Math.max(0, Math.ceil(left))}` : 'Waiting for players…' });
@@ -719,6 +721,7 @@ export class GameClient {
     if (this.phase === PHASE.WAITING) { timerHtml = '<small>WAITING</small>'; roundLabel = 'Waiting for players'; }
     else if (this.phase === PHASE.WARMUP) { roundLabel = 'Warmup'; }
     else if (this.phase === PHASE.PRACTICE) { timerHtml = '<small>PRACTICE</small>'; roundLabel = 'Free roam · no bots'; }
+    else if (this.phase === PHASE.TDM) roundLabel = 'Team Deathmatch · first to 50';
     else if (this.phase === PHASE.HALFTIME) roundLabel = 'Halftime';
     else if (this.phase === PHASE.GAMEOVER) { timerHtml = '<small>FINAL</small>'; roundLabel = 'Match over'; }
     else if (planted) timerHtml = `<span class="bombicon">${'<svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="7" width="18" height="11" rx="1.5" fill="currentColor"/><circle cx="17" cy="11" r="1.6" fill="#fff"/></svg>'}</span>`;
@@ -778,7 +781,7 @@ export class GameClient {
       for (const g of ['he', 'smoke']) if (ps.inv[g] >= 1) owned.push(g);
       if (ps.inv.flash >= 2) owned.push('flash');
       app.buyMenu.update({
-        money: this.phase === PHASE.PRACTICE ? 16000 : ps.money, team: ps.team, canBuy: canBuy.ok, reason: canBuy.reason,
+        money: this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM ? 16000 : ps.money, team: ps.team, canBuy: canBuy.ok, reason: canBuy.reason,
         time: Math.ceil(canBuy.time), owned, refundable: [...new Set(this.myBuys)], armor: ps.armor, helmet: ps.helmet,
       });
     }
@@ -788,7 +791,7 @@ export class GameClient {
   _canBuy() {
     const ps = this.ps;
     if (!ps.alive) return { ok: false, reason: 'You are dead', time: 0 };
-    if (this.phase === PHASE.PRACTICE) return { ok: true, time: 99 };
+    if (this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM) return { ok: true, time: 99 };
     if (this.phase !== PHASE.FREEZE && this.phase !== PHASE.LIVE) return { ok: false, reason: 'Buy time is over', time: 0 };
     const left = (this.buyEndTick - this.serverTickNow()) / TICK_RATE;
     if (left <= 0) return { ok: false, reason: 'Buy time is over', time: 0 };
@@ -810,7 +813,7 @@ export class GameClient {
         kit: r.num === this.num ? this.ps.defuser : !!(rem?.state && rem.state.flags & PF.DEFUSER),
       };
     }).sort((a, b) => b.score - a.score);
-    const titles = { practice: 'Practice', private: 'Private Match', '1v1': 'Duel 1v1', '2v2': 'Wingman 2v2', '5v5': 'Competitive 5v5' };
+    const titles = { practice: 'Practice', private: this.rules === 'tdm' ? 'Private · Team Deathmatch' : 'Private Match', '1v1': 'Duel 1v1', '2v2': 'Wingman 2v2', '5v5': 'Competitive 5v5', tdm: 'Team Deathmatch' };
     return { title: `${titles[this.mode] || this.mode} · ${this.cfg?.name || ''}`, ct: list(TEAM.CT), t: list(TEAM.T), scoreCT: this.scoreCT, scoreT: this.scoreT };
   }
 

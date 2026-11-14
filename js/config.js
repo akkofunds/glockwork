@@ -1,7 +1,7 @@
 // Flashpoint — core gameplay constants. All distances are in game units (1u ≈ 1 inch), time in seconds.
 
 // Bump on every release that changes gameplay/netcode: mismatched clients can't join each other.
-export const GAME_VERSION = 3;
+export const GAME_VERSION = 4;
 
 export const TICK_RATE = 64;
 export const DT = 1 / TICK_RATE;
@@ -20,8 +20,11 @@ export const MOVE = {
   accelerate: 5.5,
   airAccelerate: 12,
   maxAirWishSpeed: 30,
-  maxBhopSpeed: 320,
-  stepSize: 18,
+  maxBhopSpeed: 360,
+  bhopGain: 1.035, // speed multiplier per clean hop (capped at maxBhopSpeed)
+  airControl: 3.2, // rad/s the air velocity turns toward where you aim (easy strafing, great on mobile)
+  walkableNormal: 0.6, // ~53 degree slopes are walkable
+  stepSize: 22,
   radius: 16,
   standHeight: 72,
   crouchHeight: 54,
@@ -58,6 +61,8 @@ export const MATCH = {
   buyZoneRadius: 650,
   connectTimeout: 25,
 };
+
+export const TDM = { scoreLimit: 50, timeLimit: 600, respawnDelay: 2, spawnProtect: 1.5 };
 
 export const ECON = {
   startMoney: 800,

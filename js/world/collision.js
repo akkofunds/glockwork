@@ -159,7 +159,7 @@ export class CollisionWorld {
    Resolve a vertical capsule (feet at pos, total height h, radius r) out of the world geometry.
    pos: {x,y,z} mutated. contacts: Float32Array(3*N) receives push normals; returns contact count.
   */
-  resolveCapsule(pos, h, r, contacts, maxContacts = 16) {
+  resolveCapsule(pos, h, r, contacts, maxContacts = 16, stepHeight = 0) {
     const cp = _cp, rp = _rp;
     let nc = 0;
     for (let iter = 0; iter < 4; iter++) {
@@ -189,7 +189,28 @@ export class CollisionWorld {
         // Ignore contacts from the back side of single-sided geometry when deeply inside.
         if (dx * nx + dy * ny + dz * nz < -0.2 && d < r * 0.5) continue;
         const pen = r - (d === 1 && d2 < 1e-10 ? 0 : Math.sqrt(d2));
-        pos.x += dx * pen; pos.y += dy * pen; pos.z += dz * pen;
+        if (stepHeight > 0 && dy <= 0.6 && cp[1] >= pos.y - 0.5) {
+          // low obstacle (stair, curb, ledge) whose whole triangle sits below step height: climb onto it
+          const topY = Math.max(t[o + 1], t[o + 4], t[o + 7]);
+          if (topY <= pos.y + stepHeight + 0.5) {
+            const hd = Math.hypot(pos.x - cp[0], pos.z - cp[2]);
+            if (hd < r) {
+              const lift = cp[1] + Math.sqrt(r * r - hd * hd) - (pos.y + r);
+              if (lift > 0) {
+                pos.y += Math.min(lift, stepHeight);
+                moved = true;
+                if (nc < maxContacts) { contacts[nc * 3] = 0; contacts[nc * 3 + 1] = 1; contacts[nc * 3 + 2] = 0; nc++; }
+                continue;
+              }
+            }
+          }
+        }
+        if (dy > 0.6) {
+          // walkable ground (slopes, stair noses): lift straight up instead of sliding back down the hill
+          pos.y += Math.min(pen / dy, r);
+        } else {
+          pos.x += dx * pen; pos.y += dy * pen; pos.z += dz * pen;
+        }
         moved = true;
         if (nc < maxContacts) { contacts[nc * 3] = dx; contacts[nc * 3 + 1] = dy; contacts[nc * 3 + 2] = dz; nc++; }
       }
@@ -303,3 +324,51 @@ const _cp = new Float64Array(3);
 const _rp = new Float64Array(3);
 const _hit = {};
 const clampf = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+// Lowest floor under (x,z) with standing room above it (skips roofs and overhangs).
+// Lowest floor under (x,z) with standing room above it (skips roofs and overhangs).
+// openSky: also require a clear view of the sky (avoids spawning inside props, nooks or sealed rooms).
+export function lowestFloor(world, x, top, z, bottom, openSky = false) {
+  let y = top, best = null;
+  const hit = {};
+  for (let i = 0; i < 24 && y > bottom; i++) {
+    const t = world.raycast(x, y, z, 0, -1, 0, y - bottom, hit);
+    if (t === Infinity) break;
+    const fy = y - t;
+    if (hit.ny > 0.7 && !world.capsuleOverlaps(x, fy + 1, z, 72, 16)) {
+      const sky = !openSky || world.raycast(x, fy + 80, z, 0, 1, 0, Math.max(10, top - fy), null) === Infinity;
+      const room = !openSky || [0, 1, 2, 3].every((k) => world.raycast(x, fy + 40, z, Math.cos(k * 1.5708), 0, Math.sin(k * 1.5708), 120, null) === Infinity || false) || sky;
+      if (sky && room) best = fy;
+    }
+    y = fy - 2;
+  }
+  return best;
+}
+
+
+// Spread spawn points over all standable ground of a map (used by Team Deathmatch; no setup needed).
+export function generateSpawns(world, count = 36, minSpacing = 260) {
+  const pts = [];
+  const top = world.max[1] + 10, bottom = world.min[1] - 10;
+  const N = 28;
+  const cands = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = world.min[0] + (world.max[0] - world.min[0]) * (i + 0.5) / N;
+    const z = world.min[2] + (world.max[2] - world.min[2]) * (j + 0.5) / N;
+    const y = lowestFloor(world, x, top, z, bottom, false);
+    if (y === null) continue;
+    // must have some room around it (not wedged into a corner)
+    let open = 0;
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; if (world.raycast(x, y + 40, z, Math.cos(a), 0, Math.sin(a), 90, null) === Infinity) open++; }
+    if (open >= 6) cands.push({ x, y, z, yaw: Math.random() * Math.PI * 2 });
+  }
+  // ground level filter: ignore rooftops far above the common floor height
+  const hs = cands.map((c) => c.y).sort((a, b) => a - b);
+  const med = hs.length ? hs[Math.floor(hs.length / 2)] : 0;
+  for (const c of cands.sort(() => Math.random() - 0.5)) {
+    if (Math.abs(c.y - med) > 260) continue;
+    if (pts.every((p) => Math.hypot(p.x - c.x, p.z - c.z) >= minSpacing)) pts.push(c);
+    if (pts.length >= count) break;
+  }
+  return pts;
+}

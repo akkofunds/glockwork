@@ -72,10 +72,11 @@ export class Menus {
     const modes = [['5v5', 'COMPETITIVE', 'Standard 5v5 bomb defusal. First to 7 rounds, full economy, halftime side swap.'],
       ['2v2', 'WINGMAN', '2v2 on the same map. First to 7 rounds — quick, tactical, every duel counts.'],
       ['1v1', 'DUEL', '1v1 aim and economy duel. First to 7 rounds.'],
+      ['tdm', 'DEATHMATCH', 'Team Deathmatch: instant respawns, buy anything anywhere, first team to 50 kills. Starts with 2+ players.'],
       ['private', 'PRIVATE', 'Play your party against itself. Pick teams on the right, from 1v1 up to 5v5.'],
       ['practice', 'PRACTICE', 'Solo free-roam range: infinite money, every weapon, no bots. Place spawns for custom maps here.']];
     const size = p ? members.length : 1;
-    const modeOk = (id) => id === 'practice' ? !p || p.leader : id === 'private' ? !!p : size <= +id[0];
+    const modeOk = (id) => id === 'practice' ? !p || p.leader : id === 'private' ? !!p : id === 'tdm' ? size <= 5 : size <= +id[0];
     if (!modeOk(this.mode)) this.mode = modeOk('5v5') ? '5v5' : (p ? 'private' : 'practice');
     const desc = modes.find((m) => m[0] === this.mode)[2];
     const myTeam = members.find((m) => m.id === mm.myId)?.team;
@@ -104,7 +105,7 @@ export class Menus {
       </nav>
       <div class="lb-modetabs">${modes.map(([id, n]) => `<button class="${this.mode === id ? 'act' : ''}" data-act="mode" data-mode="${id}" ${modeOk(id) && !q ? '' : 'disabled'}>${n}</button>`).join('')}</div>
       <div class="lb-cards">${cards}</div>
-      <div class="lb-desc"><b>${modes.find((m) => m[0] === this.mode)[1]}</b> — ${desc}</div>
+      <div class="lb-desc"><b>${modes.find((m) => m[0] === this.mode)[1]}</b> — ${desc}${this.mode === 'private' ? `<div class="rules">RULES <button class="mini ${this.privRules !== 'tdm' ? 'on' : ''}" data-act="rules" data-r="defusal" ${p && p.leader ? '' : 'disabled'}>BOMB DEFUSAL</button><button class="mini ${this.privRules === 'tdm' ? 'on' : ''}" data-act="rules" data-r="tdm" ${p && p.leader ? '' : 'disabled'}>TEAM DEATHMATCH</button></div>` : ''}</div>
       <div class="lb-actions">
         <button class="lb-side" data-act="practice-now" ${q || (p && !p.leader) ? 'disabled' : ''}>PRACTICE</button>
         <button class="lb-go ${q ? 'searching' : ''}" data-act="${q ? 'cancelq' : 'play'}" ${(!leader && !q) ? 'disabled' : ''}>${!leader && !q ? 'WAITING FOR LEADER' : playLabel}</button>
@@ -139,7 +140,7 @@ export class Menus {
     if (!f) { el.classList.add('hidden'); clearInterval(this.foundTimer); this.foundTimer = null; return; }
     const isNew = el.classList.contains('hidden');
     el.classList.remove('hidden');
-    const modeName = { '5v5': 'COMPETITIVE', '2v2': 'WINGMAN', '1v1': 'DUEL' }[f.mode] || String(f.mode).toUpperCase();
+    const modeName = { '5v5': 'COMPETITIVE', '2v2': 'WINGMAN', '1v1': 'DUEL', tdm: 'TEAM DEATHMATCH' }[f.mode] || String(f.mode).toUpperCase();
     const dots = Array.from({ length: f.total }, (_, i) => `<i class="${i < f.accepted ? 'on' : ''}"></i>`).join('');
     el.innerHTML = `<div class="fd-box"><div class="fd-title">MATCH FOUND</div><div class="fd-sub">${modeName} · ${h(this.app.assets.manifest.mapName || (this.app.assets.manifest.map ? 'Custom map' : 'Dunewatch'))}</div>
       <div class="fd-dots">${dots}</div>
@@ -177,6 +178,7 @@ export class Menus {
     try {
       switch (act) {
         case 'mode': this.mode = data.mode; this.renderMain(); break;
+        case 'rules': this.privRules = data.r; this.renderMain(); break;
         case 'soctoggle': this.socOpen = !this.socOpen; this.el.querySelector('.lobby')?.classList.toggle('soc-open', this.socOpen); break;
         case 'invite': await this._act(this.partyInfo ? 'copy' : 'create'); break;
         case 'practice-now': app.startPractice(); break;
@@ -203,7 +205,7 @@ export class Menus {
           const members = this.partyInfo.members;
           if (!members.some((m) => m.team === TEAM.CT) || !members.some((m) => m.team === TEAM.T)) { this.toast('Both teams need at least one player', 'warn'); break; }
           const desc = await app.hostMapDesc();
-          mm.startPrivateMatch(desc);
+          mm.startPrivateMatch(desc, this.privRules === 'tdm' ? 'tdm' : 'defusal');
           break;
         }
         case 'pchat': { const i = $('mm-chat'); if (i.value.trim()) { mm.partyChat(i.value.trim()); i.value = ''; } break; }

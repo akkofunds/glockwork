@@ -41,6 +41,8 @@ function airAccelerate(v, wx, wz, wishspeed, dt) {
 
 function slide(ps, world, dt, horizontalOnly) {
   const v = ps.vel, p = ps.pos;
+  const hs0 = Math.hypot(v.x, v.z);
+  const grounded = ps.onGround;
   const h = hullHeight(ps.duck), r = MOVE.radius;
   const dist = Math.hypot(v.x, horizontalOnly ? 0 : v.y, v.z) * dt;
   const steps = Math.min(12, Math.max(1, Math.ceil(dist / 7)));
@@ -48,24 +50,43 @@ function slide(ps, world, dt, horizontalOnly) {
   let ground = false;
   for (let s = 0; s < steps; s++) {
     p.x += v.x * sdt; if (!horizontalOnly) p.y += v.y * sdt; p.z += v.z * sdt;
-    const nc = world.resolveCapsule(p, h, r, contacts);
+    const nc = world.resolveCapsule(p, h, r, contacts, 16, grounded ? MOVE.stepSize : 0);
     for (let i = 0; i < nc; i++) {
       const nx = contacts[i * 3], ny = contacts[i * 3 + 1], nz = contacts[i * 3 + 2];
+      // walking on walkable ground: the collision already lifted us vertically, so leave horizontal velocity alone
+      if (grounded && ny > MOVE.walkableNormal) { if (v.y < 0) v.y = 0; ground = true; continue; }
       const d = v.x * nx + v.y * ny + v.z * nz;
       if (d < 0) { v.x -= nx * d; v.y -= ny * d; v.z -= nz * d; }
-      if (ny > 0.7) ground = true;
+      if (ny > MOVE.walkableNormal) {
+        ground = true;
+        // walking up a slope: keep the horizontal speed you had (Source-style ground move), never launch upward
+        if (grounded && ny < 0.999) {
+          // the collision lift already raises us; keep full horizontal speed and stay glued to the slope
+          const hs = Math.hypot(v.x, v.z);
+          if (hs > 1e-3 && hs < hs0) { const k = hs0 / hs; v.x *= k; v.z *= k; }
+          if (v.y > 0) v.y = 0;
+        }
+      }
     }
   }
   return ground;
 }
 
-function probeGround(ps, world, dist) {
-  tmp.x = ps.pos.x; tmp.y = ps.pos.y - dist; tmp.z = ps.pos.z;
-  const nc = world.resolveCapsule(tmp, hullHeight(ps.duck), MOVE.radius, contacts);
-  let ground = false;
-  for (let i = 0; i < nc; i++) if (contacts[i * 3 + 1] > 0.7) ground = true;
-  if (ground && Math.abs(tmp.x - ps.pos.x) < 4 && Math.abs(tmp.z - ps.pos.z) < 4) return tmp.y;
-  return null;
+// Find standable ground below the player within `dist`, stepping down in small increments so a capsule
+// lands on stair treads instead of sinking into the riser.
+function probeGround(ps, world, dist, edgeOk = false) {
+  const h = hullHeight(ps.duck);
+  // a capsule resting on a step edge reports a tilted normal: accept it when stepping
+  const minNy = edgeOk ? 0.25 : MOVE.walkableNormal;
+  for (let d = Math.min(1.5, dist); ; d = Math.min(dist, d + 4)) {
+    tmp.x = ps.pos.x; tmp.y = ps.pos.y - d; tmp.z = ps.pos.z;
+    const nc = world.resolveCapsule(tmp, h, MOVE.radius, contacts, 16, edgeOk ? MOVE.stepSize : 0);
+    let ground = false;
+    for (let i = 0; i < nc; i++) if (contacts[i * 3 + 1] > minNy) ground = true;
+    if (ground && Math.abs(tmp.x - ps.pos.x) < 4 && Math.abs(tmp.z - ps.pos.z) < 4) return Math.min(tmp.y, ps.pos.y + 0.01);
+    if (nc > 0 && !ground && d > 1.5) return null; // hit a wall/riser before any floor
+    if (d >= dist) return null;
+  }
 }
 
 /*
@@ -124,6 +145,11 @@ export function simulateMovement(ps, cmd, world, opts) {
     ps.onGround = false;
     ps.jumpCooldown = 2;
     result.jumped = true;
+    // a hop chained straight off a landing (no ground friction tick) builds a little speed
+    if (ps.airTicks === 0 && ps.groundTicks <= 1) {
+      const hs = Math.hypot(v.x, v.z);
+      if (hs > 100) { const k = Math.min(MOVE.bhopGain, MOVE.maxBhopSpeed / hs); if (k > 1) { v.x *= k; v.z *= k; } }
+    }
   }
   if (ps.jumpCooldown > 0) ps.jumpCooldown--;
 
@@ -133,6 +159,19 @@ export function simulateMovement(ps, cmd, world, opts) {
     v.y = 0;
   } else {
     airAccelerate(v, wx, wz, wishspeed, dt);
+    // air control: gently turn your momentum toward where you are looking/moving (keeps speed)
+    if (wl > 0 && MOVE.airControl > 0) {
+      const hs = Math.hypot(v.x, v.z);
+      if (hs > 60) {
+        const cur = Math.atan2(v.x, v.z), want = Math.atan2(wx, wz);
+        let diff = want - cur; while (diff > Math.PI) diff -= 2 * Math.PI; while (diff < -Math.PI) diff += 2 * Math.PI;
+        if (Math.abs(diff) < 2.0) {
+          const step = Math.max(-MOVE.airControl * dt, Math.min(MOVE.airControl * dt, diff));
+          const na = cur + step;
+          v.x = Math.sin(na) * hs; v.z = Math.cos(na) * hs;
+        }
+      }
+    }
     const hs = Math.hypot(v.x, v.z);
     if (hs > MOVE.maxBhopSpeed) { const k = MOVE.maxBhopSpeed / hs; v.x *= k; v.z *= k; }
     v.y -= MOVE.gravity * dt;
@@ -147,34 +186,15 @@ export function simulateMovement(ps, cmd, world, opts) {
 
   slide(ps, world, dt, false);
 
-  // --- stair stepping ---
-  if (wasGround && !result.jumped) {
-    const want = Math.hypot(svx, svz) * dt;
-    const got = Math.hypot(ps.pos.x - sx, ps.pos.z - sz);
-    if (want > 0.05 && got < want * 0.9) {
-      const ax = ps.pos.x, ay = ps.pos.y, az = ps.pos.z, avx = v.x, avy = v.y, avz = v.z;
-      const h = hullHeight(ps.duck);
-      if (!world.capsuleOverlaps(sx, sy0 + MOVE.stepSize, sz, h, MOVE.radius - 0.5)) {
-        ps.pos.x = sx; ps.pos.y = sy0 + MOVE.stepSize; ps.pos.z = sz;
-        v.x = svx; v.y = 0; v.z = svz;
-        slide(ps, world, dt, true);
-        const gy = probeGround(ps, world, MOVE.stepSize + 1);
-        const got2 = Math.hypot(ps.pos.x - sx, ps.pos.z - sz);
-        if (gy !== null && got2 > got + 0.25 && gy >= sy0 - 0.5) {
-          ps.pos.y = gy; v.y = 0;
-        } else {
-          ps.pos.x = ax; ps.pos.y = ay; ps.pos.z = az; v.x = avx; v.y = avy; v.z = avz;
-        }
-      }
-    }
-  }
+  // stairs/curbs are climbed inside the collision pass (low obstacles lift the capsule while grounded)
+  void sx; void sy0; void sz; void svx; void svy; void svz;
 
   // --- ground categorisation & snapping down stairs/slopes ---
   if (v.y > 140) {
     ps.onGround = false;
   } else {
     const snapDist = (wasGround && !result.jumped) ? MOVE.stepSize : 1.5;
-    const gy = probeGround(ps, world, snapDist);
+    const gy = probeGround(ps, world, snapDist, wasGround);
     if (gy !== null && gy <= ps.pos.y + 0.5) {
       if (!wasGround && !result.jumped) { result.landed = true; result.fallSpeed = fallSpeed; }
       ps.pos.y = gy;
@@ -185,6 +205,9 @@ export function simulateMovement(ps, cmd, world, opts) {
     }
   }
   if (result.jumped) ps.onGround = false;
+  if (ps.onGround) { ps.groundTicks = (ps.groundTicks || 0) + 1; ps.airTicks = 0; }
+  else { ps.airTicks = (ps.airTicks || 0) + 1; ps.groundTicks = 0; }
+  if (result.landed) ps.groundTicks = 0, ps.airTicks = 0;
   // kill-plane safety
   if (ps.pos.y < world.min[1] - 2000) { ps.pos.y = world.max[1]; v.y = 0; }
   return result;

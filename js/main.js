@@ -328,7 +328,7 @@ class App {
     try {
       if (match.hostId === this.mm.myId) {
         const map = await this._ensureOwnMap();
-        this.host = new Host({ mode: match.mode, roster: match.roster, world: map.world, map: { desc: map.desc, config: map.config, bytes: map.bytes } });
+        this.host = new Host({ mode: match.mode, rules: match.rules || (match.mode === 'tdm' ? 'tdm' : 'defusal'), roster: match.roster, world: map.world, map: { desc: map.desc, config: map.config, bytes: map.bytes } });
         this.host.onEnd = () => this.leaveMatch(null);
         this.mm.gameLinkHandler = (link) => this.host && this.host.addLink(link);
         const [hl, cl] = loopPair();

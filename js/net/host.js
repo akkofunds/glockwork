@@ -1,7 +1,7 @@
 // Authoritative 64-tick match host: runs every player's commands, lag-compensated hit registration,
 // economy & buy validation, round/bomb/grenade logic, and streams snapshots + reliable events to clients.
 import {
-  TICK_RATE, DT, LAG_COMP_TICKS, GAME_VERSION, TEAM, MATCH, ECON, WEAPONS, WEAPON_CODE, GEAR, HG, HE, DEFAULT_PISTOL, MOVE, BUYABLE,
+  TICK_RATE, DT, LAG_COMP_TICKS, GAME_VERSION, TDM, TEAM, MATCH, ECON, WEAPONS, WEAPON_CODE, GEAR, HG, HE, DEFAULT_PISTOL, MOVE, BUYABLE,
 } from '../config.js';
 import { createPlayerState, simulatePlayer, giveDefaultLoadout, owns, bestWeapon, switchTo, BTN, eyePos } from '../sim/player.js';
 import { traceBullet, rayVsPose, computeDamage, segmentThroughSmoke } from '../sim/ballistics.js';
@@ -9,8 +9,9 @@ import { createGrenade, stepGrenade, shouldDetonate } from '../sim/grenade.js';
 import { encodeSnapshot, decodeCmds, readMessage, MSG, PF } from './protocol.js';
 import { wrapAngle, clamp } from '../util.js';
 import { hullHeight } from '../sim/movement.js';
+import { generateSpawns } from '../world/collision.js';
 
-export const PHASE = { WAITING: 0, WARMUP: 1, FREEZE: 2, LIVE: 3, POST: 4, HALFTIME: 5, GAMEOVER: 6, PRACTICE: 7 };
+export const PHASE = { WAITING: 0, WARMUP: 1, FREEZE: 2, LIVE: 3, POST: 4, HALFTIME: 5, GAMEOVER: 6, PRACTICE: 7, TDM: 8 };
 const HIST = 64;
 
 export class Host {
@@ -19,6 +20,7 @@ export class Host {
   */
   constructor(opts) {
     this.mode = opts.mode;
+    this.rules = opts.rules === 'tdm' ? 'tdm' : 'defusal';
     this.expected = opts.roster || [];
     this.world = opts.world;
     this.map = opts.map;
@@ -46,6 +48,53 @@ export class Host {
     this.onEnd = null;
     this._lastScoresTick = 0;
     this._ctx = this._makeCtx();
+    this.tdmSpawns = null;
+  }
+
+  _tdmSpawnPoints() {
+    if (!this.tdmSpawns) {
+      const auto = generateSpawns(this.world);
+      const fixed = [...(this.cfg.spawns?.[TEAM.CT] || []), ...(this.cfg.spawns?.[TEAM.T] || [])];
+      this.tdmSpawns = auto.length >= 6 ? auto : [...auto, ...fixed];
+      if (!this.tdmSpawns.length) this.tdmSpawns = fixed;
+    }
+    return this.tdmSpawns;
+  }
+
+  // Spawn at the point furthest from living enemies (and never in their line of sight if avoidable)
+  _tdmSpawn(p) {
+    const ps = p.ps;
+    const enemies = [...this.players.values()].filter((o) => o !== p && o.ps.alive && o.ps.team !== ps.team);
+    let best = null, bestScore = -Infinity;
+    for (const sp of this._tdmSpawnPoints()) {
+      let dmin = 99999, seen = false;
+      for (const e of enemies) {
+        const d = Math.hypot(e.ps.pos.x - sp.x, e.ps.pos.z - sp.z);
+        dmin = Math.min(dmin, d);
+        if (d < 2500 && this.world.lineOfSight(sp.x, sp.y + 64, sp.z, e.ps.pos.x, e.ps.pos.y + 60, e.ps.pos.z)) seen = true;
+      }
+      const occupied = [...this.players.values()].some((o) => o.ps.alive && Math.hypot(o.ps.pos.x - sp.x, o.ps.pos.z - sp.z) < 40);
+      const score = Math.min(dmin, 3000) - (seen ? 2000 : 0) - (occupied ? 5000 : 0) + Math.random() * 150;
+      if (score > bestScore) { bestScore = score; best = sp; }
+    }
+    giveDefaultLoadout(ps);
+    if (p.tdmPrimary && WEAPONS[p.tdmPrimary]) { const d = WEAPONS[p.tdmPrimary]; ps.inv.primary = { id: p.tdmPrimary, mag: d.mag, res: d.reserve }; ps.active = p.tdmPrimary; }
+    ps.alive = true; ps.hp = 100; ps.armor = 100; ps.helmet = true; ps.money = ECON.maxMoney;
+    ps.pos.x = best.x; ps.pos.y = best.y; ps.pos.z = best.z; ps.vel.x = 0; ps.vel.y = 0; ps.vel.z = 0;
+    ps.yaw = best.yaw; ps.pitch = 0; ps.duck = 0; ps.onGround = true; ps.velMod = 1;
+    p.forceAngles = true; p.respawnAt = 0; p.protectUntil = this.tick + TDM.spawnProtect * TICK_RATE;
+    this._event({ e: 'spawn', yaw: best.yaw }, p.num);
+  }
+
+  _startTDM() {
+    this.started = true;
+    this.phase = PHASE.TDM;
+    this.phaseEnd = this.tick + TDM.timeLimit * TICK_RATE;
+    this.round = 1;
+    this.score[TEAM.CT] = 0; this.score[TEAM.T] = 0;
+    this.bomb = { state: 5, x: 0, y: 0, z: 0, end: 0, defuser: 255, defuseEnd: 0, site: 0, carrier: 255, planter: 255 };
+    for (const p of this.players.values()) { p.stats = { k: 0, d: 0, a: 0, dmg: 0, hs: 0, mvp: 0, score: 0 }; p.ps.alive = false; this._tdmSpawn(p); }
+    this._event({ e: 'tdmStart', limit: TDM.scoreLimit, time: TDM.timeLimit });
   }
 
   // ---------- connections ----------
@@ -70,7 +119,7 @@ export class Host {
     if (m.t === 'join') return this._onJoin(link, m);
     const p = link.player; if (!p) return;
     switch (m.t) {
-      case 'ready': p.ready = true; if (this.phase === PHASE.PRACTICE || (this.started && !p.ps.alive && this.phase !== PHASE.LIVE)) this._spawnPracticeOrLate(p); break;
+      case 'ready': p.ready = true; if (this.phase === PHASE.TDM) this._tdmSpawn(p); else if (this.phase === PHASE.PRACTICE || (this.started && !p.ps.alive && this.phase !== PHASE.LIVE)) this._spawnPracticeOrLate(p); break;
       case 'buy': this._buy(p, String(m.item)); break;
       case 'refund': this._refund(p, String(m.item)); break;
       case 'ping': p.ping = clamp(m.rtt | 0, 0, 999); link.send({ t: 'pong', c: m.c }); break;
@@ -117,7 +166,7 @@ export class Host {
     }
     link.player = p;
     link.send({
-      t: 'welcome', num: p.num, mode: this.mode, map: this.map.desc, cfg: this.cfg, tick: this.tick,
+      t: 'welcome', num: p.num, mode: this.mode, rules: this.rules, map: this.map.desc, cfg: this.cfg, tick: this.tick,
       roster: this._rosterList(), items: [...this.items.values()].map((it) => this._itemMsg(it)),
       smokes: this.smokes.map((s) => ({ x: s.x, y: s.y, z: s.z, end: s.end, start: s.start })),
       ackSeq: p.lastSeq,
@@ -361,7 +410,7 @@ export class Host {
   }
 
   _inBuyZone(p) {
-    if (this.phase === PHASE.PRACTICE) return true;
+    if (this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM) return true;
     const sp = this.cfg.spawnCenter?.[p.ps.team];
     if (!sp) return true;
     return Math.hypot(p.ps.pos.x - sp.x, p.ps.pos.z - sp.z) <= (this.cfg.buyRadius || MATCH.buyZoneRadius);
@@ -369,7 +418,7 @@ export class Host {
 
   _canBuyNow(p) {
     if (!p.ps.alive) return false;
-    if (this.phase === PHASE.PRACTICE) return true;
+    if (this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM) return true;
     if (this.phase !== PHASE.FREEZE && this.phase !== PHASE.LIVE) return false;
     if (this.tick > this.freezeStart + MATCH.buyTime * TICK_RATE) return false;
     return this._inBuyZone(p);
@@ -465,9 +514,10 @@ export class Host {
   _applyDamage(victim, attacker, weapon, health, armorDmg, hg, flags) {
     const vps = victim.ps;
     if (!vps.alive) return;
-    if (this.phase !== PHASE.LIVE && this.phase !== PHASE.POST && this.phase !== PHASE.PRACTICE) return;
+    if (this.phase !== PHASE.LIVE && this.phase !== PHASE.POST && this.phase !== PHASE.PRACTICE && this.phase !== PHASE.TDM) return;
+    if (this.phase === PHASE.TDM && victim.protectUntil && this.tick < victim.protectUntil && attacker) return;
     if (attacker && attacker !== victim && attacker.ps.team === vps.team) {
-      if (this.phase === PHASE.PRACTICE) return;
+      if (this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM) return;
       health = Math.max(1, Math.floor(health * 0.33)); armorDmg = Math.floor(armorDmg * 0.33);
     }
     const before = vps.hp;
@@ -490,10 +540,10 @@ export class Host {
     if (!vps.alive) return;
     vps.alive = false; vps.hp = 0;
     victim.stats.d++;
-    // drop gear
-    if (vps.inv.primary) this._dropItem(victim, vps.inv.primary, false);
+    // drop gear (not in Team Deathmatch: everyone respawns with a fresh loadout)
+    if (this.phase === PHASE.TDM) { /* no drops */ } else if (vps.inv.primary) this._dropItem(victim, vps.inv.primary, false);
     else if (vps.inv.secondary && vps.inv.secondary.id !== DEFAULT_PISTOL[vps.team]) this._dropItem(victim, vps.inv.secondary, false);
-    if (vps.inv.c4) this._dropItem(victim, { id: 'c4' }, false);
+    if (vps.inv.c4 && this.phase !== PHASE.TDM) this._dropItem(victim, { id: 'c4' }, false);
     vps.inv = { primary: null, secondary: null, he: 0, flash: 0, smoke: 0, c4: false };
     vps.armor = 0; vps.helmet = false; vps.defuser = false;
     vps.active = 'knife';
@@ -503,7 +553,7 @@ export class Host {
       if (attacker.ps.team !== vps.team) {
         attacker.stats.k++; attacker.kills++; attacker.stats.score += 2;
         if (flags.hs) attacker.stats.hs++;
-        const reward = this.phase === PHASE.PRACTICE ? 0 : (WEAPONS[weapon]?.reward ?? 300);
+        const reward = this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM ? 0 : (WEAPONS[weapon]?.reward ?? 300);
         this._addMoney(attacker, reward);
         if (reward) this._event({ e: 'money', amt: reward, why: `Kill with ${WEAPONS[weapon]?.name || weapon}` }, attacker.num);
       } else {
@@ -525,6 +575,12 @@ export class Host {
     }
     if (this.phase === PHASE.PRACTICE) {
       setTimeout(() => { if (this.players.get(victim.num) === victim) this._spawnPracticeOrLate(victim); }, 2000);
+    }
+    if (this.phase === PHASE.TDM) {
+      if (attacker && attacker !== victim && attacker.ps.team !== vps.team) this.score[attacker.ps.team]++;
+      else if (!attacker || attacker === victim) this.score[vps.team === TEAM.CT ? TEAM.T : TEAM.CT]++;
+      victim.respawnAt = this.tick + TDM.respawnDelay * TICK_RATE;
+      return;
     }
     this._checkRoundEnd();
   }
@@ -698,7 +754,8 @@ export class Host {
     const ps = p.ps;
     const fail = (why) => this._event({ e: 'buyFail', item, why }, p.num);
     if (!this._canBuyNow(p)) return fail(this._inBuyZone(p) ? 'Buy time is over' : 'You are not in a buy zone');
-    const practice = this.phase === PHASE.PRACTICE;
+    const practice = this.phase === PHASE.PRACTICE || this.phase === PHASE.TDM;
+    if (this.phase === PHASE.TDM && WEAPONS[item]?.slot === 1) p.tdmPrimary = item;
     const pay = (cost) => { if (!practice) ps.money -= cost; };
     const grenadeCount = ps.inv.he + ps.inv.flash + ps.inv.smoke;
     if (!BUYABLE.has(item)) return fail('Not for sale');
@@ -793,7 +850,7 @@ export class Host {
     const ctx = this._ctx;
     const frozen = this.phase === PHASE.FREEZE;
     ctx.frozen = frozen;
-    ctx.noAttack = !(this.phase === PHASE.LIVE || this.phase === PHASE.POST || this.phase === PHASE.PRACTICE || this.phase === PHASE.FREEZE);
+    ctx.noAttack = !(this.phase === PHASE.LIVE || this.phase === PHASE.POST || this.phase === PHASE.PRACTICE || this.phase === PHASE.FREEZE || this.phase === PHASE.TDM);
 
     for (const p of this.players.values()) {
       let n = 0;
@@ -850,8 +907,14 @@ export class Host {
         break;
       }
       case PHASE.WARMUP:
-        if (t >= this.phaseEnd) this._startMatch();
+        if (t >= this.phaseEnd) { if (this.rules === 'tdm') this._startTDM(); else this._startMatch(); }
         break;
+      case PHASE.TDM: {
+        for (const p of this.players.values()) if (!p.ps.alive && p.respawnAt && t >= p.respawnAt) this._tdmSpawn(p);
+        const sCT = this.score[TEAM.CT], sT = this.score[TEAM.T];
+        if (sCT >= TDM.scoreLimit || sT >= TDM.scoreLimit || t >= this.phaseEnd) this._gameOver(sCT === sT ? 0 : sCT > sT ? TEAM.CT : TEAM.T, t >= this.phaseEnd ? 'time' : 'score');
+        break;
+      }
       case PHASE.FREEZE:
         if (t >= this.phaseEnd) { this.phase = PHASE.LIVE; this.phaseEnd = t + MATCH.roundTime * TICK_RATE; this._event({ e: 'live' }); }
         break;

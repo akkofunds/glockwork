@@ -10,7 +10,7 @@ export function createPlayerState(num, team) {
   return {
     num, team, alive: false, hp: 100, armor: 0, helmet: false, defuser: false, money: 800,
     pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0,
-    onGround: true, duck: 0, duckFatigue: 0, jumpCooldown: 0, velMod: 1, prevButtons: 0, time: 0,
+    onGround: true, duck: 0, duckFatigue: 0, jumpCooldown: 0, airTicks: 0, groundTicks: 0, velMod: 1, prevButtons: 0, time: 0,
     inv: { primary: null, secondary: null, he: 0, flash: 0, smoke: 0, c4: false },
     active: 'knife', last: 'knife',
     w: freshWeaponState(),

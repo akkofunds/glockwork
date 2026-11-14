@@ -5,7 +5,7 @@ import { NET_CONFIG } from '../netconfig.js';
 import { randomCode } from '../util.js';
 import { TEAM } from '../config.js';
 
-export const QUEUE_SIZES = { '1v1': 1, '2v2': 2, '5v5': 5 };
+export const QUEUE_SIZES = { '1v1': 1, '2v2': 2, '5v5': 5, tdm: 5 };
 const P = NET_CONFIG.idPrefix;
 
 class Emitter {
@@ -146,11 +146,11 @@ export class Matchmaker extends Emitter {
   }
 
   // Private friend match: leader hosts; roster comes from party team picks.
-  startPrivateMatch(mapDesc) {
+  startPrivateMatch(mapDesc, rules = 'defusal') {
     const p = this.party;
     if (!p || !p.leader) throw new Error('Only the party leader can start');
     const roster = p.members.map((m) => ({ id: m.id, name: m.name, team: m.team }));
-    const match = { hostId: this.myId, roster, mode: 'private', map: mapDesc };
+    const match = { hostId: this.myId, roster, mode: 'private', rules, map: mapDesc };
     for (const l of p.links.values()) l.send({ t: 'match', match });
     this.emit('match', match);
   }
@@ -233,6 +233,7 @@ export class Matchmaker extends Emitter {
       };
     });
     cp.on('disconnected', () => { try { cp.reconnect(); } catch { /* ignore */ } });
+    q.coordTimer = setInterval(() => { if (this.queue === q) this._coordTick(); else clearInterval(q.coordTimer); }, 2000);
     this._coordTick();
   }
 
@@ -253,7 +254,20 @@ export class Matchmaker extends Emitter {
       if (b + n <= size) { pick[i] = 2; if (dfs(i + 1, a, b + n)) return true; }
       pick[i] = 0; return dfs(i + 1, a, b);
     };
-    if (!q.proposal) dfs(0, 0, 0);
+    if (!q.proposal && q.mode !== 'tdm') dfs(0, 0, 0);
+    // Team Deathmatch: flexible teams — launch with 2+ players once the queue has waited a bit (or is full)
+    if (!q.proposal && q.mode === 'tdm') {
+      const total = es.reduce((n, e) => n + e.members.length, 0);
+      const oldest = es.length ? performance.now() - Math.min(...es.map((e) => e.t)) : 0;
+      if (total >= 2 && (total >= 10 || oldest > 12000)) {
+        let a = 0, b = 0;
+        es.forEach((e, i) => {
+          const n = e.members.length;
+          if (a <= b && a + n <= 5) { pick[i] = 1; a += n; } else if (b + n <= 5) { pick[i] = 2; b += n; } else pick[i] = 0;
+        });
+        if (a > 0 && b > 0) solution = pick.slice();
+      }
+    }
     if (solution) {
       const chosen = es.filter((_, i) => solution[i]);
       const roster = [];
@@ -340,7 +354,7 @@ export class Matchmaker extends Emitter {
     if (pr.accepted.size === pr.chosen.length) {
       clearTimeout(pr.timer);
       q.proposal = null;
-      const match = { hostId: pr.chosen[0].entry, roster: pr.roster, mode: q.mode, map: { kind: 'default' } };
+      const match = { hostId: pr.chosen[0].entry, roster: pr.roster, mode: q.mode, rules: q.mode === 'tdm' ? 'tdm' : 'defusal', map: { kind: 'default' } };
       q.entries = q.entries.filter((e) => !pr.chosen.includes(e));
       let meIncluded = false;
       for (const e of pr.chosen) {
@@ -378,6 +392,7 @@ export class Matchmaker extends Emitter {
     this.queue = null;
     q.gen = -1;
     if (q.coordLink) q.coordLink.close();
+    if (q.coordTimer) clearInterval(q.coordTimer);
     if (q.coordPeer) {
       for (const e of q.entries || []) e.link?.close();
       try { q.coordPeer.destroy(); } catch { /* ignore */ }

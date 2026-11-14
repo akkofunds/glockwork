@@ -58,6 +58,21 @@ Players can still override any slot just for themselves in the Model & Map Manag
 
 With no manifest, the game uses the original built-in *Dunewatch* arena and a built-in operator.
 
+## Modes
+
+- **Competitive 5v5 / Wingman 2v2 / Duel 1v1**: bomb defusal, first to 7 rounds, full economy.
+- **Team Deathmatch** (queue or private): first team to 50 kills or most kills after 10 minutes.
+  - **Spawns:** you respawn after 2 s at whichever automatic spawn point is furthest from living enemies, with 1.5 s of spawn protection. No setup is needed.
+  - **Buying:** buy anything, anywhere, for free. Your last rifle or AWP comes back on every respawn.
+  - **Queue:** starts once 2 or more players have been found (it waits about 12 s for more, up to 5v5).
+- **Private:** your party plays itself, with Bomb Defusal or Team Deathmatch rules.
+- **Practice:** solo free roam.
+
+## Movement
+
+- **Bhop:** hold Space (or the mobile JUMP button) to bunny hop automatically. Each clean hop adds a little speed, up to 360 u/s. In the air your momentum turns toward where you aim, so you don't need perfect A/D strafing.
+- **Slopes and steps:** slopes up to about 53° and steps up to 22 units are climbed at full running speed.
+
 ## Lobby & queue
 
 - **Lobby:** a 3D lineup of your party's operators with name plates and invite slots.

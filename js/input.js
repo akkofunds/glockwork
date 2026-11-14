@@ -112,7 +112,8 @@ export class Input {
     if (h.has('use') || (t && t.use)) b |= BTN.USE;
     if (h.has('inspect')) b |= BTN.INSPECT;
     if (h.has('drop') || (t && t.drop)) b |= BTN.DROP;
-    if (performance.now() - this.jumpAt <= 50 || (t && performance.now() - t.jumpAt <= 50)) b |= BTN.JUMP;
+    // hold Space / the jump button to auto-hop; the wheel and quick taps use a 50 ms landing buffer
+    if (h.has('jump') || (t && t.jumpHeld) || performance.now() - this.jumpAt <= 50 || (t && performance.now() - t.jumpAt <= 50)) b |= BTN.JUMP;
     return b;
   }
 }
