@@ -1,0 +1,6 @@
+{
+  "soldier": "assets/models/soldier.glb",
+  "map": "assets/models/map.glb",
+  "mapName": "Dust 2",
+  "mapConfig": null
+}
