@@ -76,10 +76,11 @@ export class Input {
 
   requestLock() {
     if (this.touch) return;
+    const fallback = () => { try { const q = this.canvas.requestPointerLock(); if (q && q.catch) q.catch(() => {}); } catch { /* needs a click: "Click to play" is shown */ } };
     try {
       const p = this.canvas.requestPointerLock({ unadjustedMovement: true });
-      if (p && p.catch) p.catch(() => { try { this.canvas.requestPointerLock(); } catch { /* ignore */ } });
-    } catch { try { this.canvas.requestPointerLock(); } catch { /* ignore */ } }
+      if (p && p.catch) p.catch(fallback);
+    } catch { fallback(); }
     // capture Ctrl+W etc. where supported (Chromium fullscreen)
     if (navigator.keyboard && navigator.keyboard.lock && document.fullscreenElement) navigator.keyboard.lock(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Escape']).catch(() => {});
   }

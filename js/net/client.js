@@ -708,6 +708,12 @@ export class GameClient {
     const app = this.app, hud = app.hud, ps = this.ps;
     const tick = this.serverTickNow();
     const left = (this.phaseEnd - tick) / TICK_RATE;
+    if (this.mode !== 'practice' && (this.phase === PHASE.WAITING || this.phase === PHASE.WARMUP)) {
+      const titles = { private: 'PRIVATE MATCH', '1v1': 'DUEL', '2v2': 'WINGMAN', '5v5': 'COMPETITIVE' };
+      const list = (t) => [...this.roster.values()].filter((r) => r.team === t).map((r) => ({ name: r.name, me: r.num === this.num, ready: r.num === this.num || this.remotes.has(r.num) }));
+      hud.versus({ mode: titles[this.mode] || this.mode, map: (this.cfg?.name || 'Map').toUpperCase(), ct: list(TEAM.CT), t: list(TEAM.T),
+        status: this.phase === PHASE.WARMUP ? `Match starts in ${Math.max(0, Math.ceil(left))}` : 'Waiting for players…' });
+    } else hud.versus(null);
     let timerHtml = fmtTime(left), roundLabel = `Round ${this.round}`;
     const planted = this.bomb.state === 2;
     if (this.phase === PHASE.WAITING) { timerHtml = '<small>WAITING</small>'; roundLabel = 'Waiting for players'; }

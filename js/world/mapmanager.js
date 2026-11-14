@@ -73,7 +73,7 @@ export class MapManager {
   /*
    Build a custom map from .glb bytes. scaleOverride: number or null (auto).
   */
-  async buildGLB(bytes, quality, name = 'Custom Map', cfgFromHost = null) {
+  async buildGLB(bytes, quality, name = 'Custom Map', cfgFromHost = null, fallbackCfg = null) {
     const hash = await hashBytes(bytes);
     const gltf = await parseGLB(bytes.slice(0));
     const root = new THREE.Group();
@@ -92,7 +92,7 @@ export class MapManager {
       }
     });
     scene.updateMatrixWorld(true);
-    const over = cfgFromHost || loadOverrides(hash) || {};
+    const over = cfgFromHost || loadOverrides(hash) || fallbackCfg || {};
     // Normalise any map: plausible size (game maps are ~1.5k-16k units across), centred on the origin, floor at y=0.
     let box = new THREE.Box3().setFromObject(scene);
     const size = box.getSize(new THREE.Vector3());

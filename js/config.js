@@ -122,7 +122,7 @@ export const WEAPONS = {
     armorPen: 0.85, model: 'knife',
   },
   glock: {
-    name: 'Glock-17', slot: 2, cls: 'pistol', price: 200, team: 2, reward: 300, speed: 240,
+    name: 'Glock-17', slot: 2, cls: 'pistol', price: 200, team: 0, reward: 300, speed: 240,
     damage: 30, armorPen: 0.47, rangeMod: 0.85, range: 4096, rpm: 400, mag: 20, reserve: 120, reloadTime: 2.2, drawTime: 0.6,
     auto: false, burst: true, pen: 8,
     inacc: { stand: 0.0085, crouch: 0.0065, move: 0.022, air: 0.14, fire: 0.028, max: 0.07, recovery: 0.28 },
@@ -164,7 +164,7 @@ export const WEAPONS = {
     pattern: 'smg', recover: 9, model: 'mp9', sound: 'smg',
   },
   ak47: {
-    name: 'AK-47', slot: 1, cls: 'rifle', price: 2700, team: 2, reward: 300, speed: 215,
+    name: 'AK-47', slot: 1, cls: 'rifle', price: 2700, team: 0, reward: 300, speed: 215,
     damage: 36, armorPen: 0.775, rangeMod: 0.98, range: 8192, rpm: 600, mag: 30, reserve: 90, reloadTime: 2.45, drawTime: 1.0,
     auto: true, pen: 26,
     inacc: { stand: 0.0042, crouch: 0.003, move: 0.11, air: 0.36, fire: 0.0072, max: 0.065, recovery: 0.36 },
@@ -197,7 +197,7 @@ export const WEAPONS = {
   c4: { name: 'C4 Explosive', slot: 5, cls: 'c4', price: 0, team: 2, reward: 0, speed: 250, drawTime: 0.6, model: 'c4' },
 };
 // Glock's T default and USP's CT default are free in the starting loadout.
-export const DEFAULT_PISTOL = { 1: 'usp', 2: 'glock' };
+export const DEFAULT_PISTOL = { 1: 'glock', 2: 'glock' };
 
 export const GEAR = {
   kevlar: { name: 'Kevlar Vest', price: 650 },
@@ -209,14 +209,15 @@ export const GEAR = {
 export const WEAPON_IDS = ['none', 'knife', 'glock', 'usp', 'p250', 'deagle', 'mac10', 'mp9', 'ak47', 'm4a1s', 'ssg08', 'awp', 'he', 'flash', 'smoke', 'c4'];
 export const WEAPON_CODE = Object.fromEntries(WEAPON_IDS.map((id, i) => [id, i]));
 
+// The arsenal is built from the provided models: Glock-17, AK-47, AWP (sniper) and the knife.
 export const BUY_MENU = [
-  { cat: 'Pistols', items: ['glock', 'usp', 'p250', 'deagle'] },
-  { cat: 'SMGs', items: ['mac10', 'mp9'] },
-  { cat: 'Rifles', items: ['ak47', 'm4a1s'] },
-  { cat: 'Snipers', items: ['ssg08', 'awp'] },
+  { cat: 'Pistols', items: ['glock'] },
+  { cat: 'Rifles', items: ['ak47'] },
+  { cat: 'Snipers', items: ['awp'] },
   { cat: 'Gear', items: ['kevlar', 'vesthelm', 'defuser'] },
   { cat: 'Grenades', items: ['flash', 'smoke', 'he'] },
 ];
+export const BUYABLE = new Set(BUY_MENU.flatMap((c) => c.items));
 
 export const GRENADE_PHYS = { gravity: 800 * 0.4 * 1.6, elasticity: 0.45, throwSpeed: 750, underhandSpeed: 380, radius: 2 };
 

@@ -346,11 +346,22 @@ function estimateJoints(parts, bones) {
 // ---------------- Asset manager -----------------
 export class AssetManager {
   constructor() {
+    this.manifest = {};
     this.config = loadConfig();
     this.cache = new Map(); // slot -> {template, info}
     this.quality = 'low';
     this.listeners = new Set();
   }
+  // Optional repo-wide defaults: assets/models/manifest.json  { "soldier": "...glb", "map": "...glb", "mapConfig": {...} }
+  async loadManifest() {
+    try {
+      const r = await fetch('assets/models/manifest.json', { cache: 'no-cache' });
+      if (r.ok) this.manifest = await r.json();
+    } catch { this.manifest = {}; }
+    return this.manifest;
+  }
+  defaultUrl(slot) { return (this.manifest && typeof this.manifest[slot] === 'string' && this.manifest[slot]) || DEFAULT_URL[slot] || null; }
+
   slotConfig(slot) { return this.config[slot] || { source: 'default' }; }
   tune(slot) { return { ...DEFAULT_TUNE, ...(this.config[slot]?.tune || {}) }; }
   setTune(slot, tune) {
@@ -398,10 +409,12 @@ export class AssetManager {
     const c = this.slotConfig(slot);
     if (c.source === 'file') { const r = await idbGet('slot_' + slot); return r ? { bytes: r.bytes, name: r.name, hash: r.hash } : null; }
     if (c.source === 'url') { const res = await fetch(c.url); if (!res.ok) return null; const bytes = await res.arrayBuffer(); return { bytes, name: c.name, hash: await hashBytes(bytes) }; }
-    if (DEFAULT_URL[slot]) {
-      const res = await fetch(DEFAULT_URL[slot]);
-      if (!res.ok) return null;
-      return { bytes: await res.arrayBuffer(), name: DEFAULT_URL[slot].split('/').pop(), bundled: true };
+    const url = this.defaultUrl(slot);
+    if (url) {
+      const res = await fetch(url);
+      if (!res.ok) { console.warn('default asset missing', url); return null; }
+      const bytes = await res.arrayBuffer();
+      return { bytes, name: url.split('/').pop(), bundled: url === DEFAULT_URL[slot], url, hash: await hashBytes(bytes) };
     }
     return null;
   }

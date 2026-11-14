@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy this file to manifest.json. Every player then loads these models by default (no per-browser setup).",
+  "soldier": "assets/models/soldier.glb",
+  "map": "assets/models/map.glb",
+  "mapName": "My Map",
+  "mapConfig": null
+}

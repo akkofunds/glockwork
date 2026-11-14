@@ -260,6 +260,16 @@ export class HUD {
     else this.text('speedo', '');
   }
 
+  // ---------- pre-match versus screen ----------
+  versus(data) {
+    const el = $('versus');
+    if (!data) { if (!el.classList.contains('hidden')) el.classList.add('hidden'); this.cache.versus = ''; return; }
+    el.classList.remove('hidden');
+    const col = (list, cls, title) => `<div class="vs-col ${cls}"><h3>${title}</h3>${list.map((p) => `<div class="vs-card ${p.me ? 'me' : ''}"><i>${escapeHtml(p.name.slice(0, 1).toUpperCase())}</i><b>${escapeHtml(p.name)}</b><span>${p.ready ? 'READY' : 'CONNECTING…'}</span></div>`).join('') || '<div class="vs-card empty">—</div>'}</div>`;
+    this.set('versus', `<div class="vs-top"><div class="vs-mode">${escapeHtml(data.mode)}</div><div class="vs-map">${escapeHtml(data.map)}</div></div>
+      <div class="vs-body">${col(data.ct, 'ct', 'COUNTER-TERRORISTS')}<div class="vs-mid">VS<small>${escapeHtml(data.status)}</small></div>${col(data.t, 't', 'TERRORISTS')}</div>`);
+  }
+
   // ---------- scoreboard ----------
   showScoreboard(v) { this.scoreboardOpen = v; $('scoreboard').classList.toggle('hidden', !v); }
   renderScoreboard(data) {

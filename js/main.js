@@ -87,6 +87,8 @@ class App {
   }
 
   async init() {
+    $('boot-msg').textContent = 'Loading defaults…';
+    await this.assets.loadManifest();
     $('boot-msg').textContent = 'Loading weapons…';
     await this.weaponLib.load(this.settings.quality);
     $('boot-msg').textContent = 'Preparing operators…';
@@ -200,12 +202,13 @@ class App {
   hideLoading() { $('loading').classList.add('hidden'); }
 
   // ---------- maps ----------
+  // The map this browser hosts with: a Model-Manager map, else the repo default from manifest.json, else Dunewatch.
   async _myMap() {
-    const cfg = this.assets.slotConfig('map');
-    if (cfg.source === 'default') return this.mapManager.buildBuiltin(this.renderer.renderer, this.settings.quality);
     const src = await this.assets.getBytes('map');
     if (!src) return this.mapManager.buildBuiltin(this.renderer.renderer, this.settings.quality);
-    const m = await this.mapManager.buildGLB(src.bytes, this.settings.quality, src.name || 'Custom Map');
+    const fallback = this.assets.slotConfig('map').source === 'default' ? this.assets.manifest.mapConfig || null : null;
+    const m = await this.mapManager.buildGLB(src.bytes, this.settings.quality, this.assets.manifest.mapName || src.name || 'Custom Map', null, fallback);
+    if (src.url) m.desc.url = src.url; // clients fetch repo maps straight from the site
     await idbPut('map_' + m.hash, { bytes: src.bytes, name: src.name });
     return m;
   }
@@ -244,6 +247,9 @@ class App {
     else {
       let rec = await idbGet('map_' + desc.hash);
       let bytes = rec?.bytes;
+      if (!bytes && desc.url) {
+        try { const r = await fetch(desc.url); if (r.ok) { const b = await r.arrayBuffer(); if (await hashBytes(b) === desc.hash) bytes = b; } } catch { /* fall back to host stream */ }
+      }
       if (!bytes) {
         bytes = await requestBytes();
         const h = await hashBytes(bytes);
@@ -320,7 +326,7 @@ class App {
     this.audio.play('roundStart', 0.6);
     try {
       if (match.hostId === this.mm.myId) {
-        const map = match.mode === 'private' ? await this._ensureOwnMap() : await this.ensureMap({ kind: 'builtin', name: 'dunewatch' }, null);
+        const map = await this._ensureOwnMap();
         this.host = new Host({ mode: match.mode, roster: match.roster, world: map.world, map: { desc: map.desc, config: map.config, bytes: map.bytes } });
         this.host.onEnd = () => this.leaveMatch(null);
         this.mm.gameLinkHandler = (link) => this.host && this.host.addLink(link);
@@ -381,9 +387,12 @@ class App {
     requestAnimationFrame(this._loop);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    if (this.client) this.client.frame(dt);
-    else this._menuCamera(dt);
-    this.renderer.render(this.client && this.client.ready ? this.viewmodel : null);
+    if (this.client) {
+      this.client.frame(dt);
+      this.renderer.render(this.client.ready ? this.viewmodel : null);
+    } else {
+      this._lobbyFrame(dt);
+    }
     this.renderer.adapt(dt);
     // fps
     const f = this.fps; f.frames++; f.t += dt;
@@ -393,20 +402,83 @@ class App {
     }
   }
 
-  _menuCamera(dt) {
-    // slow fly-over of the map behind the menu
-    if (!this.map) {
-      if (!this._menuMapPending) {
-        this._menuMapPending = true;
-        this._ensureOwnMap().catch((e) => console.warn(e)).finally(() => { this._menuMapPending = false; });
-      }
-      return;
+  // ---------- 3D lobby lineup ----------
+  _buildLobby() {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x07090d);
+    scene.fog = new THREE.Fog(0x07090d, 260, 620);
+    scene.add(new THREE.HemisphereLight(0xbfd2ff, 0x2a2018, 1.1));
+    const key = new THREE.DirectionalLight(0xffe2c0, 2.4); key.position.set(-120, 220, -260); scene.add(key);
+    const rim = new THREE.DirectionalLight(0x5aa9ff, 1.6); rim.position.set(160, 120, 220); scene.add(rim);
+    const rim2 = new THREE.DirectionalLight(0xff8a1f, 1.0); rim2.position.set(-180, 90, 200); scene.add(rim2);
+    // floor with radial glow
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const x = c.getContext('2d');
+    const g = x.createRadialGradient(256, 256, 10, 256, 256, 256);
+    g.addColorStop(0, '#2a3340'); g.addColorStop(0.45, '#151a22'); g.addColorStop(1, '#07090d');
+    x.fillStyle = g; x.fillRect(0, 0, 512, 512);
+    x.strokeStyle = 'rgba(255,138,31,0.35)'; x.lineWidth = 3;
+    for (const r of [120, 160]) { x.beginPath(); x.arc(256, 256, r, 0, Math.PI * 2); x.stroke(); }
+    const floorTex = new THREE.CanvasTexture(c); floorTex.colorSpace = THREE.SRGBColorSpace;
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(420, 64), new THREE.MeshBasicMaterial({ map: floorTex }));
+    floor.rotation.x = -Math.PI / 2; scene.add(floor);
+    // backdrop: angled panels with accent light strips
+    const panelMat = new THREE.MeshLambertMaterial({ color: 0x141922 });
+    const stripMat = new THREE.MeshBasicMaterial({ color: 0xff8a1f });
+    for (let i = -4; i <= 4; i++) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(70, 260, 6), panelMat);
+      const a = i * 0.16;
+      p.position.set(Math.sin(a) * 330, 130, Math.cos(a) * 330); p.rotation.y = a; scene.add(p);
+      const st = new THREE.Mesh(new THREE.BoxGeometry(2, 200, 1), i % 2 ? stripMat : new THREE.MeshBasicMaterial({ color: 0x5aa9ff }));
+      st.position.set(Math.sin(a) * 326 + Math.cos(a) * 36, 120, Math.cos(a) * 326 - Math.sin(a) * 36); st.rotation.y = a; scene.add(st);
     }
-    this._mt = (this._mt || 0) + dt * 0.04;
-    const cam = this.renderer.camera;
-    cam.position.set(Math.sin(this._mt) * 900, 520, 400 + Math.cos(this._mt) * 900);
-    cam.lookAt(0, 0, -200);
-    this.renderer.applyZoom(1);
+    const cam = new THREE.PerspectiveCamera(36, 1, 1, 2000);
+    this.lobby = { scene, cam, chars: [], key: '', t: 0 };
+  }
+
+  _lobbyFrame(dt) {
+    if (!this.lobby) this._buildLobby();
+    const L = this.lobby;
+    L.t += dt;
+    const members = this.menus.lineup();
+    const slots = [[0, 0], [-62, 22], [62, 22], [-122, 46], [122, 46]];
+    const key = members.map((m) => m.id + m.team).join('|') + '#' + this.charFactory.version + '#' + this.weaponLib.version;
+    if (key !== L.key) {
+      L.key = key;
+      for (const c of L.chars) c.dispose();
+      L.chars = members.map((m, i) => {
+        const ch = this.charFactory.make(m.team === 2 ? 2 : 1);
+        const wpn = ['ak47', 'awp', 'ak47', 'glock', 'ak47'][i];
+        ch.setWeapon(wpn, this.weaponLib.get(wpn));
+        L.scene.add(ch.root);
+        ch.slot = slots[i];
+        return ch;
+      });
+    }
+    L.chars.forEach((ch, i) => {
+      const t = L.t + i * 1.7;
+      ch.update(dt, { x: ch.slot[0], y: 0, z: ch.slot[1], yaw: (i === 0 ? 0.55 : (ch.slot[0] > 0 ? 0.85 : 0.3)) + Math.sin(t * 0.4) * 0.04, pitch: -0.42 + Math.sin(t * 0.8) * 0.03, duck: 0, vx: 0, vz: 0, onGround: true, alive: true });
+    });
+    const w = window.innerWidth, h = window.innerHeight;
+    const cam = L.cam;
+    cam.aspect = w / h;
+    const narrow = w / h < 1.2;
+    cam.fov = narrow ? 52 : 34;
+    cam.position.set(Math.sin(L.t * 0.08) * 14, 58, -230);
+    cam.lookAt(0, narrow ? 46 : 40, 20);
+    cam.updateProjectionMatrix();
+    // name plates under each operator, plus invite slots
+    const items = [];
+    const v = new THREE.Vector3();
+    for (let i = 0; i < 5; i++) {
+      const m = members[i];
+      v.set(slots[i][0], -2, slots[i][1]).project(cam);
+      items.push({ x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h + 6, visible: v.z < 1, empty: !m, name: m?.name || '', team: m?.team, me: m?.me, leader: m?.leader });
+    }
+    this.menus.updatePlates(items);
+    const r = this.renderer.renderer;
+    r.clear();
+    r.render(L.scene, cam);
   }
 }
 

@@ -83,6 +83,9 @@ export class Matchmaker extends Emitter {
       if (mem && (m.team === TEAM.CT || m.team === TEAM.T)) { mem.team = m.team; this._broadcastParty(); }
     } else if (m.t === 'chat') {
       this._broadcastParty({ t: 'chat', from: party.members.find((x) => x.linkId === link.id)?.name, text: String(m.text).slice(0, 120) });
+    } else if (m.t === 'paccept' && this.found && this.found.pid === m.pid) {
+      this.found.memberAccepts.add(link.id);
+      this._maybeSendEntryAccept();
     }
   }
 
@@ -116,7 +119,8 @@ export class Matchmaker extends Emitter {
       if (m.t === 'party') { this.party.members = m.members; this.emit('party', this.party); }
       else if (m.t === 'full' || m.t === 'busy') { this.emit('error', m.t === 'full' ? 'Party is full' : 'Party is currently in queue'); }
       else if (m.t === 'qstat') this.emit('queue', { mode: m.mode, found: m.found, needed: m.needed, status: m.status });
-      else if (m.t === 'match') this.emit('match', m.match);
+      else if (m.t === 'match') { this.found = null; this.emit('found', null); this.emit('match', m.match); }
+      else if (m.t === 'found' || m.t === 'acc' || m.t === 'decline') this._onFound(m);
       else if (m.t === 'chat') this.emit('chat', m);
     };
     link.onClose = () => { if (this.party?.link === link) { this.party = null; this.emit('party', null); this.emit('error', 'Left party (leader disconnected)'); } };
@@ -191,6 +195,7 @@ export class Matchmaker extends Emitter {
       link.onMessage = (d) => {
         let m; try { m = JSON.parse(d); } catch { return; }
         if (m.t === 'qstat') { q.found = m.found; q.needed = m.needed; q.status = 'searching'; this._emitQueue(); }
+        else if (m.t === 'found' || m.t === 'acc' || m.t === 'decline') this._onFound(m);
         else if (m.t === 'match') this._matchFound(m.match);
       };
       link.onClose = () => {
@@ -213,13 +218,19 @@ export class Matchmaker extends Emitter {
       if (link.kind !== 'queue') { link.close(); return; }
       link.onMessage = (d) => {
         let m; try { m = JSON.parse(d); } catch { return; }
+        if (m.t === 'accept') { this._coordAccept(link, m.pid); return; }
         if (m.t === 'join' && Array.isArray(m.members) && m.members.length <= QUEUE_SIZES[q.mode]) {
           q.entries = q.entries.filter((e) => e.entry !== m.entry);
           q.entries.push({ entry: m.entry, members: m.members.slice(0, 5).map((x) => ({ id: String(x.id), name: String(x.name).slice(0, 20) })), link, t: performance.now() });
           this._coordTick();
         }
       };
-      link.onClose = () => { if (this.queue === q) { q.entries = q.entries.filter((e) => e.link !== link); this._coordTick(); } };
+      link.onClose = () => {
+        if (this.queue !== q) return;
+        q.entries = q.entries.filter((e) => e.link !== link);
+        if (q.proposal && q.proposal.chosen.some((e) => e.link === link)) this._proposalFail();
+        this._coordTick();
+      };
     });
     cp.on('disconnected', () => { try { cp.reconnect(); } catch { /* ignore */ } });
     this._coordTick();
@@ -230,8 +241,8 @@ export class Matchmaker extends Emitter {
     const size = QUEUE_SIZES[q.mode];
     const found = q.entries.reduce((s, e) => s + e.members.length, 0);
     const needed = size * 2;
-    // Try to partition entries (FIFO preference) into two full teams, parties kept together
-    const es = q.entries;
+    // Try to partition free entries (FIFO preference) into two full teams, parties kept together
+    const es = q.entries.filter((e) => !e.locked);
     const pick = new Array(es.length).fill(0);
     let solution = null;
     const dfs = (i, a, b) => {
@@ -242,29 +253,21 @@ export class Matchmaker extends Emitter {
       if (b + n <= size) { pick[i] = 2; if (dfs(i + 1, a, b + n)) return true; }
       pick[i] = 0; return dfs(i + 1, a, b);
     };
-    dfs(0, 0, 0);
+    if (!q.proposal) dfs(0, 0, 0);
     if (solution) {
       const chosen = es.filter((_, i) => solution[i]);
       const roster = [];
       chosen.forEach((e) => {
         const team = solution[es.indexOf(e)] === 1 ? TEAM.CT : TEAM.T;
         e.members.forEach((m) => roster.push({ id: m.id, name: m.name, team }));
+        e.locked = true;
       });
-      const hostId = chosen[0].entry;
-      const match = { hostId, roster, mode: q.mode, map: { kind: 'builtin', name: 'dunewatch' } };
-      q.entries = es.filter((_, i) => !solution[i]);
-      let meIncluded = false;
-      for (const e of chosen) {
-        if (e.link) { e.link.send({ t: 'match', match }); setTimeout(() => e.link.close(), 1500); }
-        else meIncluded = true;
-      }
-      if (meIncluded) {
-        // hand the coordinator role to whoever remains (they reconnect & re-elect)
-        const cp = q.coordPeer;
-        setTimeout(() => { for (const e of q.entries) e.link?.close(); try { cp.destroy(); } catch { /* ignore */ } }, 1600);
-        this._matchFound(match);
-        return;
-      }
+      const pid = randomCode(8);
+      const total = roster.length;
+      q.proposal = { pid, chosen, roster, accepted: new Set(), total, timer: setTimeout(() => this._proposalTimeout(), 16000) };
+      const msg = { t: 'found', pid, mode: q.mode, roster: roster.map((r) => ({ name: r.name, team: r.team })), total, ttl: 15 };
+      for (const e of chosen) { if (e.link) e.link.send(msg); else this._onFound(msg); }
+      return;
     }
     const f2 = q.entries.reduce((s, e) => s + e.members.length, 0);
     for (const e of q.entries) e.link?.send({ t: 'qstat', found: f2, needed });
@@ -282,6 +285,8 @@ export class Matchmaker extends Emitter {
   }
 
   _matchFound(match) {
+    this.found = null;
+    this.emit('found', null);
     const q = this.queue;
     if (q) {
       this.queue = null;
@@ -291,6 +296,81 @@ export class Matchmaker extends Emitter {
     if (this.party?.leader) for (const l of this.party.links.values()) l.send({ t: 'match', match });
     this.emit('queue', null);
     this.emit('match', match);
+  }
+
+  // ---- match accept flow ----
+  _onFound(m) {
+    if (m.t === 'found') {
+      this.found = { pid: m.pid, mode: m.mode, roster: m.roster, total: m.total, accepted: 0, me: false, deadline: performance.now() + m.ttl * 1000, memberAccepts: new Set() };
+    } else if (m.t === 'acc') {
+      if (this.found && this.found.pid === m.pid) this.found.accepted = m.n;
+    } else if (m.t === 'decline') {
+      this.found = null;
+    }
+    if (this.party?.leader) for (const l of this.party.links.values()) l.send(m);
+    this.emit('found', this.found);
+  }
+
+  acceptMatch() {
+    const f = this.found; if (!f || f.me) return;
+    f.me = true;
+    if (this.party && !this.party.leader) { this.party.link.send({ t: 'paccept', pid: f.pid }); this.emit('found', f); return; }
+    this._maybeSendEntryAccept();
+    this.emit('found', f);
+  }
+
+  _maybeSendEntryAccept() {
+    const f = this.found; if (!f || !f.me || f.sent) return;
+    if (this.party?.leader && f.memberAccepts.size < this.party.links.size) return;
+    f.sent = true;
+    const q = this.queue; if (!q) return;
+    if (q.coordLink) q.coordLink.send({ t: 'accept', pid: f.pid });
+    else if (q.coordPeer) this._coordAccept(null, f.pid);
+  }
+
+  _coordAccept(link, pid) {
+    const q = this.queue, pr = q?.proposal;
+    if (!pr || pr.pid !== pid) return;
+    const entry = pr.chosen.find((e) => e.link === link);
+    if (!entry) return;
+    pr.accepted.add(entry);
+    const n = [...pr.accepted].reduce((s2, e) => s2 + e.members.length, 0);
+    const msg = { t: 'acc', pid, n };
+    for (const e of pr.chosen) { if (e.link) e.link.send(msg); else this._onFound(msg); }
+    if (pr.accepted.size === pr.chosen.length) {
+      clearTimeout(pr.timer);
+      q.proposal = null;
+      const match = { hostId: pr.chosen[0].entry, roster: pr.roster, mode: q.mode, map: { kind: 'default' } };
+      q.entries = q.entries.filter((e) => !pr.chosen.includes(e));
+      let meIncluded = false;
+      for (const e of pr.chosen) {
+        if (e.link) { e.link.send({ t: 'match', match }); setTimeout(() => e.link.close(), 1500); } else meIncluded = true;
+      }
+      if (meIncluded) {
+        const cp = q.coordPeer;
+        setTimeout(() => { for (const e of q.entries) e.link?.close(); try { cp.destroy(); } catch { /* ignore */ } }, 1600);
+        this._matchFound(match);
+      } else this._coordTick();
+    }
+  }
+
+  _proposalTimeout() { this._proposalFail(true); }
+  _proposalFail(timeout) {
+    const q = this.queue, pr = q?.proposal;
+    if (!pr) return;
+    clearTimeout(pr.timer);
+    q.proposal = null;
+    for (const e of pr.chosen) {
+      e.locked = false;
+      if (pr.accepted.has(e)) { if (e.link) e.link.send({ t: 'decline', pid: pr.pid }); else this._onFound({ t: 'decline', pid: pr.pid }); }
+      else if (timeout) {
+        // did not accept in time: removed from the queue (CS-style)
+        q.entries = q.entries.filter((x) => x !== e);
+        if (e.link) { e.link.send({ t: 'decline', pid: pr.pid, kicked: true }); setTimeout(() => e.link.close(), 300); }
+        else { this._onFound({ t: 'decline', pid: pr.pid }); setTimeout(() => this.leaveQueue(), 0); }
+      }
+    }
+    this._coordTick();
   }
 
   leaveQueue() {

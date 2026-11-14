@@ -22,30 +22,49 @@ To test locally, serve the folder with any static server (for example `npx serve
 
 ## Your models
 
-Bundled in `assets/models/` (Draco geometry, 2048 px WebP textures):
+The arsenal is built from the provided models, with real names:
 
-| Model | Used for |
-|---|---|
-| `ak47.glb` | AK-47, M4A1-S, MP9, MAC-10 |
-| `awp.glb` | AWP, SSG 08 |
-| `glock17.glb` | Glock-17, USP-S, P250, Desert Eagle |
-| `knife.glb` | Knife |
+| Weapon | Price | Model |
+|---|---|---|
+| Glock-17 | free default for both teams ($200 to rebuy) | `assets/models/glock17.glb` |
+| AK-47 | $2,700 | `assets/models/ak47.glb` |
+| AWP | $4,750 | `assets/models/awp.glb` |
+| Knife | free | `assets/models/knife.glb` |
 
-Grenades and the C4 are small built-in models.
+Kevlar ($650), Kevlar + Helmet ($1,000), Defuse Kit ($400), Flashbang, Smoke and HE grenades are also for sale.
 
-**Map and Soldier:** open **ESC → Model & Map Manager**, choose the slot, and pick a `.glb` (file picker, drag-and-drop, or a path in the repo such as `assets/models/my_map.glb`). The file is stored in your browser (IndexedDB), so you only do it once per device.
+### Make your soldier and map the default for everyone
 
-- **Hosting a private match on a custom map:** the map file streams to the other players automatically.
+1. Upload your soldier and map `.glb` files into `assets/models/` (on GitHub: **Add file → Upload files**).
+2. Copy `assets/models/manifest.example.json` to `assets/models/manifest.json` and set the paths:
+   ```json
+   { "soldier": "assets/models/soldier.glb", "map": "assets/models/map.glb", "mapName": "My Map", "mapConfig": null }
+   ```
+3. Redeploy. Every player now loads your soldier and map automatically. Clients fetch the map from the site, and every map is verified by hash.
+4. Set the spawns and bombsites:
+   1. In **Practice**, open **ESC → Arsenal (Model & Map Manager) → Map**.
+   2. Walk to each spot and press **Set T spawn / CT spawn / site A / site B here**.
+   3. Press **Copy config for manifest.json** and paste the result as `"mapConfig"`.
+
+Players can still override any slot just for themselves in the Model & Map Manager (file picker, drag-and-drop or repo path). The Alignment Tuner (X/Y/Z, pitch/yaw/roll, scale) has a live preview.
+
 - **Custom maps:**
-  - The map is auto-scaled, centred and given spatial-hashed collision.
-  - Set the T/CT spawns, bombsites A/B and the buy-zone radius in Practice using **Set … here**, with live markers.
+  - The map is auto-scaled and centred, with spatial-hashed collision.
+  - Spawns land on the lowest standable floor.
 - **Soldier models:**
   - Any humanoid `.glb` is normalised to 72 units tall and auto-rigged.
   - Bones named `RightHand`, `hand_r`, `mixamorigRightHand` and similar are used to calibrate the rig.
   - Weapons are held with two-bone IK at a socket in front of the chest, so they don't clip into the body.
-- **Alignment Tuner:** X/Y/Z, pitch/yaw/roll and scale sliders for every slot, with a live preview.
 
-With no custom files, the game uses the original built-in *Dunewatch* arena and a built-in operator.
+With no manifest, the game uses the original built-in *Dunewatch* arena and a built-in operator.
+
+## Lobby & queue
+
+- **Lobby:** a 3D lineup of your party's operators with name plates and invite slots.
+- **Modes:** Competitive 5v5, Wingman 2v2, Duel 1v1, Private and Practice.
+- **Queue:** a searching bar with a timer and player count.
+- **MATCH FOUND:** everyone must press **ACCEPT** within 15 s. Anyone who doesn't is removed from the queue, and players who did accept go back to searching.
+- **Versus screen:** shows both teams and the map until the match starts.
 
 ## Performance
 

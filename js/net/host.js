@@ -1,7 +1,7 @@
 // Authoritative 64-tick match host: runs every player's commands, lag-compensated hit registration,
 // economy & buy validation, round/bomb/grenade logic, and streams snapshots + reliable events to clients.
 import {
-  TICK_RATE, DT, LAG_COMP_TICKS, TEAM, MATCH, ECON, WEAPONS, WEAPON_CODE, GEAR, HG, HE, DEFAULT_PISTOL, MOVE,
+  TICK_RATE, DT, LAG_COMP_TICKS, TEAM, MATCH, ECON, WEAPONS, WEAPON_CODE, GEAR, HG, HE, DEFAULT_PISTOL, MOVE, BUYABLE,
 } from '../config.js';
 import { createPlayerState, simulatePlayer, giveDefaultLoadout, owns, bestWeapon, switchTo, BTN, eyePos } from '../sim/player.js';
 import { traceBullet, rayVsPose, computeDamage, segmentThroughSmoke } from '../sim/ballistics.js';
@@ -700,6 +700,7 @@ export class Host {
     const practice = this.phase === PHASE.PRACTICE;
     const pay = (cost) => { if (!practice) ps.money -= cost; };
     const grenadeCount = ps.inv.he + ps.inv.flash + ps.inv.smoke;
+    if (!BUYABLE.has(item)) return fail('Not for sale');
     if (WEAPONS[item]) {
       const def = WEAPONS[item];
       if (def.team && def.team !== ps.team) return fail('Not available for your team');

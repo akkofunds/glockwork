@@ -30,7 +30,8 @@ export class Menus {
   _bindMatchmaker() {
     const mm = this.app.mm;
     mm.on('party', (p) => { this.partyInfo = p; this.renderMain(); this.renderLobbyOverlay(); });
-    mm.on('queue', (q) => { this.queueInfo = q; this.renderMain(); });
+    mm.on('queue', (q) => { if (q && !this.queueInfo) this.queueStart = this.queueStart || performance.now(); if (!q) this.queueStart = 0; this.queueInfo = q; this.renderMain(); });
+    mm.on('found', (f) => this.renderFound(f));
     mm.on('error', (e) => this.toast(e, 'warn'));
     mm.on('chat', (m) => this.toast(`${m.from || 'Party'}: ${m.text}`));
   }
@@ -52,68 +53,116 @@ export class Menus {
   }
   hideMain() { this.el.classList.add('hidden'); this.closePreview(); }
 
+  // Lobby members shown on the 3D lineup (you in the centre)
+  lineup() {
+    const mm = this.app.mm, p = this.partyInfo;
+    const me = { id: mm.myId || 'me', name: this.app.settings.name, team: TEAM.CT, me: true, leader: !p || p.leader };
+    if (!p || !p.members?.length) return [me];
+    const list = p.members.map((m) => ({ ...m, me: m.id === mm.myId, name: m.id === mm.myId ? this.app.settings.name : m.name }));
+    list.sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0));
+    return list.slice(0, 5);
+  }
+
   renderMain() {
     if (this.el.classList.contains('hidden')) return;
     const app = this.app, mm = app.mm, p = this.partyInfo, q = this.queueInfo;
     const leader = !p || p.leader;
     const members = p ? p.members : [];
     const invite = p ? `${location.origin}${location.pathname}?party=${p.code}` : '';
-    const modes = [['1v1', 'Duel', '1 vs 1'], ['2v2', 'Wingman', '2 vs 2'], ['5v5', 'Competitive', '5 vs 5']];
+    const modes = [['5v5', 'Competitive', '5v5 · First to 7'], ['2v2', 'Wingman', '2v2 · First to 7'], ['1v1', 'Duel', '1v1 · First to 7'], ['private', 'Private', 'Friends · Custom teams'], ['practice', 'Practice', 'Solo · Free roam']];
+    const size = p ? members.length : 1;
+    const modeOk = (id) => id === 'practice' ? !p || p.leader : id === 'private' ? !!p : size <= +id[0];
+    if (!modeOk(this.mode)) this.mode = modeOk('5v5') ? '5v5' : (p ? 'private' : 'practice');
     const myTeam = members.find((m) => m.id === mm.myId)?.team;
-    const teamList = (t) => members.filter((m) => m.team === t).map((m) => `<li>${h(m.name)}${m.leader ? ' <i class="crown">★</i>' : ''}${m.id === mm.myId ? ' <i>(you)</i>' : ''}${p.leader && m.id !== mm.myId ? ` <button class="mini" data-act="swapteam" data-id="${h(m.id)}" data-team="${t === TEAM.CT ? TEAM.T : TEAM.CT}">⇄</button>` : ''}</li>`).join('') || '<li class="empty">—</li>';
+    const teamList = (t) => members.filter((m) => m.team === t).map((m) => `<li>${h(m.name)}${m.leader ? ' <i class="crown">★</i>' : ''}${p.leader && m.id !== mm.myId ? ` <button class="mini" data-act="swapteam" data-id="${h(m.id)}" data-team="${t === TEAM.CT ? TEAM.T : TEAM.CT}">⇄</button>` : ''}</li>`).join('') || '<li class="empty">—</li>';
+    const elapsed = q ? Math.floor((performance.now() - (this.queueStart || performance.now())) / 1000) : 0;
+    const playLabel = q ? 'CANCEL' : this.mode === 'practice' ? 'START' : this.mode === 'private' ? 'START MATCH' : 'PLAY';
     this.el.innerHTML = `
-    <div class="mm-wrap">
-      <header class="mm-head">
+    <div class="lobby">
+      <nav class="lb-nav">
         <div class="logo"><span class="spark"></span>FLASH<b>POINT</b></div>
-        <div class="tag">Tactical bomb defusal · peer-to-peer · 100% PvP, no bots</div>
-      </header>
-      <div class="mm-grid">
-        <section class="card play">
-          <h2>Play</h2>
-          <label class="fld">Callsign <input id="mm-name" maxlength="20" value="${h(app.settings.name)}"></label>
-          <div class="modes">${modes.map(([id, n, s]) => `<button class="mode ${this.mode === id ? 'act' : ''}" data-act="mode" data-mode="${id}" ${p && members.length > (+id[0]) ? 'disabled' : ''}><b>${n}</b><span>${s}</span></button>`).join('')}</div>
-          ${q ? `<div class="queue"><div class="spinner"></div><div><b>Searching ${h(q.mode)}…</b><span>${q.found}/${q.needed} players found</span><small>${h(q.status || '')}</small></div><button class="ghost" data-act="cancelq">Cancel</button></div>`
-    : `<button class="primary big" data-act="queue" ${!leader ? 'disabled' : ''}>${!leader ? 'Leader starts the queue' : 'FIND MATCH'}</button>`}
-          <p class="hint">Parties always queue onto the same team. Matches launch automatically when enough players are found.</p>
-          <button class="ghost wide" data-act="practice">Practice range (solo · free roam · no bots)</button>
-        </section>
-        <section class="card party">
-          <h2>Party</h2>
-          ${p ? `
-            <div class="code">Code <b>${h(p.code)}</b> <button class="mini" data-act="copy">Copy invite link</button></div>
-            <input class="invite" readonly value="${h(invite)}">
-            <div class="teams">
-              <div class="tcol ct"><h3>Counter-Terrorists</h3><ul>${teamList(TEAM.CT)}</ul>${!p.leader && myTeam !== TEAM.CT ? '<button class="mini" data-act="myteam" data-team="1">Join CT</button>' : ''}</div>
-              <div class="tcol t"><h3>Terrorists</h3><ul>${teamList(TEAM.T)}</ul>${!p.leader && myTeam !== TEAM.T ? '<button class="mini" data-act="myteam" data-team="2">Join T</button>' : ''}</div>
-            </div>
-            <p class="hint">Team picks apply to <b>Private Match</b>. Public queues keep the whole party together.</p>
-            ${p.leader ? `<button class="primary" data-act="private" ${members.length < 2 ? 'disabled' : ''}>Start private match (${members.length} players)</button>` : '<p class="hint">Waiting for the leader…</p>'}
-            <div class="row"><input id="mm-chat" placeholder="Party chat…" maxlength="120"><button class="mini" data-act="pchat">Send</button></div>
-            <button class="ghost" data-act="leave">Leave party</button>
-          ` : `
-            <p>Queue with friends or play a private 1v1–5v5 match.</p>
-            <button class="primary" data-act="create">Create party</button>
-            <div class="row"><input id="mm-code" maxlength="5" placeholder="CODE" autocomplete="off"><button data-act="join">Join</button></div>
-          `}
-        </section>
-        <section class="card misc">
-          <h2>Setup</h2>
-          <button class="wide" data-act="settings">Settings &amp; crosshair</button>
-          <button class="wide" data-act="models">Model &amp; Map Manager</button>
-          <button class="wide" data-act="controls">Controls</button>
-          <div class="net ${mm.peer ? 'ok' : ''}">${mm.peer ? 'Online · ' + h(mm.myId.slice(-6)) : 'Offline (connects when you play)'}</div>
-          <p class="hint small">Graphics: ${PRESETS[app.settings.quality].label}. Free signalling via PeerJS cloud; matches run peer-to-peer with an elected host.</p>
-        </section>
+        <div class="lb-tabs"><button class="act">PLAY</button><button data-act="models">ARSENAL</button><button data-act="settings">SETTINGS</button><button data-act="controls">CONTROLS</button></div>
+        <div class="lb-me"><span class="dot ${mm.peer ? 'ok' : ''}"></span><input id="mm-name" maxlength="20" value="${h(app.settings.name)}" title="Callsign"></div>
+      </nav>
+      ${q ? `<div class="lb-queue"><div class="pulse"></div><div class="qtxt"><b>SEARCHING FOR MATCH</b><span>${h({ '5v5': 'Competitive', '2v2': 'Wingman', '1v1': 'Duel' }[q.mode] || q.mode)} · <em id="q-time">${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}</em> · ${q.found}/${q.needed} players found</span></div><button class="qx" data-act="cancelq">✕</button></div>` : ''}
+      <div id="lb-plates" class="lb-plates"></div>
+      <aside class="lb-party">
+        <h3>PARTY ${p ? `<span class="pc">${members.length}/5</span>` : ''}</h3>
+        ${p ? `
+          <div class="code">CODE <b>${h(p.code)}</b></div>
+          <button class="primary sm" data-act="copy">Copy invite link</button>
+          <input class="invite" readonly value="${h(invite)}">
+          <div class="teams">
+            <div class="tcol ct"><h4>CT</h4><ul>${teamList(TEAM.CT)}</ul>${!p.leader && myTeam !== TEAM.CT ? '<button class="mini" data-act="myteam" data-team="1">Join CT</button>' : ''}</div>
+            <div class="tcol t"><h4>T</h4><ul>${teamList(TEAM.T)}</ul>${!p.leader && myTeam !== TEAM.T ? '<button class="mini" data-act="myteam" data-team="2">Join T</button>' : ''}</div>
+          </div>
+          <p class="hint small">Teams apply to Private matches. Queues keep the party together.</p>
+          <div class="row"><input id="mm-chat" placeholder="Party chat…" maxlength="120"><button class="mini" data-act="pchat">Send</button></div>
+          <button class="ghost sm" data-act="leave">Leave party</button>
+        ` : `
+          <p class="hint">Invite friends to queue together or play a private match.</p>
+          <button class="primary sm" data-act="create">Create party</button>
+          <div class="row"><input id="mm-code" maxlength="5" placeholder="PARTY CODE" autocomplete="off"><button class="mini" data-act="join">Join</button></div>
+        `}
+      </aside>
+      <div class="lb-bottom">
+        <div class="lb-modes">${modes.map(([id, n, sub]) => `<button class="lb-mode ${this.mode === id ? 'act' : ''}" data-act="mode" data-mode="${id}" ${modeOk(id) && !q ? '' : 'disabled'}><b>${n}</b><span>${sub}</span></button>`).join('')}</div>
+        <button class="lb-play ${q ? 'searching' : ''}" data-act="${q ? 'cancelq' : 'play'}" ${(!leader && !q) ? 'disabled' : ''}>${!leader && !q ? 'WAITING FOR LEADER' : playLabel}</button>
       </div>
-      <footer class="mm-foot">WASD move · Mouse aim · Space/Wheel jump · Shift walk · Ctrl crouch · B buy · E use/defuse · G drop · F inspect · Tab scores</footer>
     </div>`;
     this._wireMain();
+    this.plateKey = '';
+  }
+
+  // Called every frame by the lobby renderer with projected screen positions of each operator
+  updatePlates(items) {
+    const el = $('lb-plates');
+    if (!el) return;
+    const key = items.map((i) => i.name + i.team + i.leader + i.empty).join('|');
+    if (key !== this.plateKey) {
+      this.plateKey = key;
+      el.innerHTML = items.map((i, k) => i.empty
+        ? `<div class="plate empty" data-k="${k}" data-act="invite"><b>+</b><span>INVITE</span></div>`
+        : `<div class="plate ${i.team === TEAM.T ? 't' : 'ct'} ${i.me ? 'me' : ''}" data-k="${k}"><b>${h(i.name)}</b><span>${i.leader ? '★ LEADER' : 'READY'}</span></div>`).join('');
+      el.querySelectorAll('[data-act=invite]').forEach((b) => b.addEventListener('click', () => this._act(this.partyInfo ? 'copy' : 'create')));
+    }
+    items.forEach((i, k) => {
+      const d = el.children[k];
+      if (d) { d.style.transform = `translate(${Math.round(i.x)}px, ${Math.round(i.y)}px) translate(-50%, 0)`; d.style.display = i.visible ? '' : 'none'; }
+    });
+    const qt = $('q-time');
+    if (qt && this.queueStart) { const e = Math.floor((performance.now() - this.queueStart) / 1000); qt.textContent = `${Math.floor(e / 60)}:${String(e % 60).padStart(2, '0')}`; }
+  }
+
+  // MATCH FOUND accept screen
+  renderFound(f) {
+    const el = $('found');
+    if (!f) { el.classList.add('hidden'); clearInterval(this.foundTimer); this.foundTimer = null; return; }
+    const isNew = el.classList.contains('hidden');
+    el.classList.remove('hidden');
+    const modeName = { '5v5': 'COMPETITIVE', '2v2': 'WINGMAN', '1v1': 'DUEL' }[f.mode] || String(f.mode).toUpperCase();
+    const dots = Array.from({ length: f.total }, (_, i) => `<i class="${i < f.accepted ? 'on' : ''}"></i>`).join('');
+    el.innerHTML = `<div class="fd-box"><div class="fd-title">MATCH FOUND</div><div class="fd-sub">${modeName} · ${h(this.app.assets.manifest.mapName || (this.app.assets.manifest.map ? 'Custom map' : 'Dunewatch'))}</div>
+      <div class="fd-dots">${dots}</div>
+      <button class="fd-accept ${f.me ? 'done' : ''}" id="fd-accept">${f.me ? 'ACCEPTED' : 'ACCEPT'}</button>
+      <div class="fd-bar"><i id="fd-bar"></i></div><div class="fd-hint">${f.me ? 'Waiting for other players…' : 'Accept to join the match'}</div></div>`;
+    $('fd-accept').addEventListener('click', () => { this.app.audio.init(); this.app.audio.play('buy'); this.app.mm.acceptMatch(); });
+    if (isNew) { this.app.audio.init(); this.app.audio.play('win', 0.6); }
+    if (!this.foundTimer) {
+      this.foundTimer = setInterval(() => {
+        const ff = this.app.mm.found;
+        if (!ff) return;
+        const left = Math.max(0, ff.deadline - performance.now());
+        const bar = $('fd-bar'); if (bar) bar.style.width = (left / 150) + '%';
+        if (left <= 0 && !ff.me) { this.app.mm.found = null; this.renderFound(null); this.app.mm.leaveQueue(); this.toast('Match not accepted — removed from queue', 'warn'); }
+      }, 100);
+    }
   }
 
   _wireMain() {
     const app = this.app, mm = app.mm;
     const name = $('mm-name');
-    name.addEventListener('change', () => { app.settings.name = name.value.trim().slice(0, 20) || app.settings.name; mm.name = app.settings.name; saveSettings(app.settings); });
+    name.addEventListener('change', () => { app.settings.name = name.value.trim().slice(0, 20) || app.settings.name; mm.name = app.settings.name; saveSettings(app.settings); this.plateKey = ''; });
     const code = $('mm-code');
     if (code) code.addEventListener('keydown', (e) => { if (e.key === 'Enter') this._act('join'); });
     const chat = $('mm-chat');
@@ -129,7 +178,13 @@ export class Menus {
     try {
       switch (act) {
         case 'mode': this.mode = data.mode; this.renderMain(); break;
-        case 'queue': await mm.joinQueue(this.mode); break;
+        case 'play':
+          if (this.mode === 'practice') { app.startPractice(); break; }
+          if (this.mode === 'private') { await this._act('private'); break; }
+          this.queueStart = performance.now();
+          await mm.joinQueue(this.mode);
+          break;
+        case 'queue': this.queueStart = performance.now(); await mm.joinQueue(this.mode); break;
         case 'cancelq': mm.leaveQueue(); break;
         case 'practice': app.startPractice(); break;
         case 'create': await mm.createParty(); break;
@@ -288,7 +343,8 @@ export class Menus {
     const slot = this.tuneSlot;
     const t = assets.tune(slot);
     const cfg = (s) => assets.slotConfig(s);
-    const srcName = (s) => { const c = cfg(s); return c.source === 'file' ? `File: ${c.name}` : c.source === 'url' ? `Path: ${c.name}` : (s === 'map' ? 'Built-in Dunewatch' : s === 'soldier' ? 'Built-in operator' : 'Bundled model'); };
+    const man = assets.manifest || {};
+    const srcName = (s) => { const c = cfg(s); return c.source === 'file' ? `File: ${c.name}` : c.source === 'url' ? `Path: ${c.name}` : (man[s] ? `Repo default: ${man[s]}` : s === 'map' ? 'Built-in Dunewatch' : s === 'soldier' ? 'Built-in operator' : 'Bundled model'); };
     const mapCfg = app.map?.config;
     body.innerHTML = `<h2>Model &amp; Map Manager</h2>
       <p class="hint">Assign any <b>.glb</b> (Draco supported) by file picker, drag-and-drop, or a path in your repo (e.g. <code>assets/models/my_map.glb</code>). Files are stored locally in your browser. Other weapons use built-in models.</p>
@@ -310,6 +366,7 @@ export class Menus {
           ${this._slider('Buy zone radius', 'brad', 200, 1500, 10, mapCfg?.buyRadius || 700)}
           <label class="chk"><input type="checkbox" id="mk-show" ${app.markersOn ? 'checked' : ''}> Show spawn / site markers</label>
           <button class="primary" data-mp="save">Save map config &amp; restart practice</button>
+          <button class="mini" data-mp="export">Copy config for manifest.json (makes it the default for everyone)</button>
         ` : `
           <div class="pv"><canvas id="pv-canvas" width="360" height="240"></canvas></div>
           ${this._slider('X', 'x', -20, 20, 0.1, t.x)}${this._slider('Y', 'y', -20, 20, 0.1, t.y)}${this._slider('Z', 'z', -20, 20, 0.1, t.z)}
@@ -380,6 +437,11 @@ export class Menus {
   _mapEdit(what, body) {
     const app = this.app, c = app.map?.config, ps = app.client?.ps;
     if (!c) return;
+    if (what === 'export') {
+      const json = JSON.stringify({ spawnCenter: c.spawnCenter, sites: c.sites.map(({ name, x, y, z, r }) => ({ name, x, y, z, r })), buyRadius: c.buyRadius, scale: c.scale }, null, 2);
+      navigator.clipboard.writeText(json).then(() => this.toast('Copied — paste it as "mapConfig" in assets/models/manifest.json'), () => { prompt('Copy this into manifest.json as "mapConfig":', json); });
+      return;
+    }
     if (what === 'save') {
       const over = { spawnCenter: c.spawnCenter, sites: c.sites, buyRadius: c.buyRadius };
       if (this._pendingScale !== undefined) over.scale = this._pendingScale || undefined;
