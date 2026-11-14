@@ -29,14 +29,20 @@ function spawnRing(c, yaw, world) {
 }
 
 // Lowest floor under (x,z) with standing room above it (skips roofs and overhangs).
-export function lowestFloor(world, x, top, z, bottom) {
+// Lowest floor under (x,z) with standing room above it (skips roofs and overhangs).
+// openSky: also require a clear view of the sky (avoids spawning inside props, nooks or sealed rooms).
+export function lowestFloor(world, x, top, z, bottom, openSky = false) {
   let y = top, best = null;
   const hit = {};
   for (let i = 0; i < 24 && y > bottom; i++) {
     const t = world.raycast(x, y, z, 0, -1, 0, y - bottom, hit);
     if (t === Infinity) break;
     const fy = y - t;
-    if (hit.ny > 0.7 && !world.capsuleOverlaps(x, fy + 1, z, 72, 16)) best = fy;
+    if (hit.ny > 0.7 && !world.capsuleOverlaps(x, fy + 1, z, 72, 16)) {
+      const sky = !openSky || world.raycast(x, fy + 80, z, 0, 1, 0, Math.max(10, top - fy), null) === Infinity;
+      const room = !openSky || [0, 1, 2, 3].every((k) => world.raycast(x, fy + 40, z, Math.cos(k * 1.5708), 0, Math.sin(k * 1.5708), 120, null) === Infinity || false) || sky;
+      if (sky && room) best = fy;
+    }
     y = fy - 2;
   }
   return best;
@@ -97,7 +103,9 @@ export class MapManager {
     let box = new THREE.Box3().setFromObject(scene);
     const size = box.getSize(new THREE.Vector3());
     const extent = Math.max(size.x, size.z) || 1;
-    const autoScale = extent >= 1500 && extent <= 16000 ? 1 : 4500 / extent;
+    // Prefer standard unit conversions (Sketchfab's 0.01 root, metres -> inches) before a size guess.
+    const fits = (k) => extent * k >= 1800 && extent * k <= 16000;
+    const autoScale = fits(1) ? 1 : fits(100) ? 100 : fits(39.37) ? 39.37 : fits(0.01) ? 0.01 : 4500 / extent;
     const scale = over.scale || autoScale;
     scene.scale.multiplyScalar(scale);
     scene.updateMatrixWorld(true);
@@ -114,16 +122,27 @@ export class MapManager {
     const c = box.getCenter(new THREE.Vector3());
     const alongZ = (box.max.z - box.min.z) >= (box.max.x - box.min.x);
     const L = alongZ ? box.max.z - box.min.z : box.max.x - box.min.x;
+    // the map's main ground level = most common open-sky floor height (keeps spawns off rooftops)
+    const hist = new Map();
+    for (let i = 0; i < 24; i++) for (let j = 0; j < 24; j++) {
+      const x = box.min.x + (box.max.x - box.min.x) * (i + 0.5) / 24, z = box.min.z + (box.max.z - box.min.z) * (j + 0.5) / 24;
+      const y = lowestFloor(world, x, box.max.y + 10, z, box.min.y - 10, true);
+      if (y !== null) { const k = Math.round(y / 48); hist.set(k, (hist.get(k) || 0) + 1); }
+    }
+    let groundLevel = null, bestN = 0;
+    for (const [k, n] of hist) if (n > bestN) { bestN = n; groundLevel = k * 48; }
     const at = (f, side) => {
       const p = alongZ ? new THREE.Vector3(c.x + side * (box.max.x - box.min.x) * 0.25, box.max.y, box.min.z + L * f) : new THREE.Vector3(box.min.x + L * f, box.max.y, c.z + side * (box.max.z - box.min.z) * 0.25);
-      // spiral outward until we find real, standable floor
-      for (let r = 0; r <= 2000; r += 64) {
-        const steps = r === 0 ? 1 : Math.ceil((2 * Math.PI * r) / 96);
-        for (let k = 0; k < steps; k++) {
-          const a = (k / steps) * Math.PI * 2;
-          const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
-          const y = lowestFloor(world, x, box.max.y + 10, z, box.min.y - 10);
-          if (y !== null) return { x, y, z };
+      // spiral outward until we find real, standable, open-sky floor (then relax the sky requirement)
+      for (const openSky of [true, false]) {
+        for (let r = 0; r <= 2400; r += 64) {
+          const steps = r === 0 ? 1 : Math.ceil((2 * Math.PI * r) / 96);
+          for (let k = 0; k < steps; k++) {
+            const a = (k / steps) * Math.PI * 2;
+            const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+            const y = lowestFloor(world, x, box.max.y + 10, z, box.min.y - 10, openSky);
+            if (y !== null && (groundLevel === null || Math.abs(y - groundLevel) <= 160 || !openSky)) return { x, y, z };
+          }
         }
       }
       return { x: p.x, y: box.min.y, z: p.z };

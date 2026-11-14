@@ -2,7 +2,7 @@
 // interpolation, event handling (kills, damage, grenades, bomb, economy) and per-frame presentation.
 import * as THREE from 'three';
 import {
-  DT, TICK_RATE, INTERP_TICKS, TEAM, TEAM_NAME, WEAPONS, WEAPON_IDS, WEAPON_CODE, MATCH, FLASH, HG, GEAR,
+  DT, TICK_RATE, INTERP_TICKS, GAME_VERSION, TEAM, TEAM_NAME, WEAPONS, WEAPON_IDS, WEAPON_CODE, MATCH, FLASH, HG, GEAR,
 } from '../config.js';
 import {
   createPlayerState, simulatePlayer, statesDiffer, owns, currentInaccuracy, recoilOffset, activeSlotData, eyePos,
@@ -66,7 +66,7 @@ export class GameClient {
     this._makeCtx();
     link.onMessage = (d) => this.onMessage(d);
     link.onClose = () => { if (!this.closed) this.app.leaveMatch(this.matchOver ? null : 'Disconnected from host'); };
-    link.send({ t: 'join', name: app.settings.name, peerId: opts.peerId });
+    link.send({ t: 'join', name: app.settings.name, peerId: opts.peerId, ver: GAME_VERSION });
     this._pingTimer = setInterval(() => link.send({ t: 'ping', c: performance.now(), rtt: Math.round(this.rtt) }), 1000);
   }
 

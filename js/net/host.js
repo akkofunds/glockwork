@@ -1,7 +1,7 @@
 // Authoritative 64-tick match host: runs every player's commands, lag-compensated hit registration,
 // economy & buy validation, round/bomb/grenade logic, and streams snapshots + reliable events to clients.
 import {
-  TICK_RATE, DT, LAG_COMP_TICKS, TEAM, MATCH, ECON, WEAPONS, WEAPON_CODE, GEAR, HG, HE, DEFAULT_PISTOL, MOVE, BUYABLE,
+  TICK_RATE, DT, LAG_COMP_TICKS, GAME_VERSION, TEAM, MATCH, ECON, WEAPONS, WEAPON_CODE, GEAR, HG, HE, DEFAULT_PISTOL, MOVE, BUYABLE,
 } from '../config.js';
 import { createPlayerState, simulatePlayer, giveDefaultLoadout, owns, bestWeapon, switchTo, BTN, eyePos } from '../sim/player.js';
 import { traceBullet, rayVsPose, computeDamage, segmentThroughSmoke } from '../sim/ballistics.js';
@@ -89,6 +89,7 @@ export class Host {
 
   _onJoin(link, m) {
     if (link.player) return;
+    if (m.ver !== GAME_VERSION) { link.send({ t: 'reject', reason: 'Game version mismatch — refresh the page (Ctrl+Shift+R) to get the latest Flashpoint' }); setTimeout(() => link.close(), 500); return; }
     let exp = this.expected.find((r) => r.id === m.peerId);
     let p = this.byPeer.get(m.peerId);
     if (!exp && !p) {

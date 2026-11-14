@@ -20,8 +20,7 @@ const ICON = {
 };
 
 const WEAPON_GLYPH = {
-  knife: 'KNIFE', glock: 'GLOCK', usp: 'USP-S', p250: 'P250', deagle: 'DEAGLE', mac10: 'MAC-10', mp9: 'MP9', ak47: 'AK-47',
-  m4a1s: 'M4A1-S', ssg08: 'SSG 08', awp: 'AWP', he: 'HE', flash: 'FLASH', smoke: 'SMOKE', c4: 'C4', world: 'WORLD',
+  knife: 'KNIFE', glock: 'GLOCK-17', ak47: 'AK-47', awp: 'AWP', he: 'HE', flash: 'FLASH', smoke: 'SMOKE', c4: 'C4', world: 'WORLD',
 };
 
 export class HUD {

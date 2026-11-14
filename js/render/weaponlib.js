@@ -1,17 +1,11 @@
-// Weapon model library: every gun uses the user's .glb models (rifles/SMGs -> AK-47 model, snipers -> AWP model,
-// pistols -> Glock-17 model, knife -> knife model). Procedural meshes are only used for grenades/C4, or as a
-// last-resort fallback if a .glb fails to load.
+// Weapon model library: every gun uses the provided .glb models (Glock-17, AK-47, AWP, knife).
 import * as THREE from 'three';
 import { proceduralWeapon } from './weaponmodels.js';
 import { applyTune } from '../assets.js';
 
-const GLB_SLOT = {
-  ak47: 'ak47', m4a1s: 'ak47', mac10: 'ak47', mp9: 'ak47',
-  awp: 'awp', ssg08: 'awp',
-  glock: 'glock17', usp: 'glock17', p250: 'glock17', deagle: 'glock17',
-  knife: 'knife',
-};
-const PROC_KEY = { glock: 'glock17', usp: 'usp', p250: 'p250', deagle: 'deagle', mac10: 'mac10', mp9: 'mp9', ak47: 'ak47', m4a1s: 'm4a1s', ssg08: 'ssg08', awp: 'awp', knife: 'knife', he: 'he', flash: 'flash', smoke: 'smoke', c4: 'c4' };
+const GLB_SLOT = { ak47: 'ak47', awp: 'awp', glock: 'glock17', knife: 'knife' };
+// procedural meshes: grenades/C4 always; guns only if a .glb fails to load
+const PROC_KEY = { glock: 'glock17', ak47: 'ak47', awp: 'awp', knife: 'knife', he: 'he', flash: 'flash', smoke: 'smoke', c4: 'c4' };
 
 export class WeaponLibrary {
   constructor(assets) {

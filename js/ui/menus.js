@@ -69,69 +69,68 @@ export class Menus {
     const leader = !p || p.leader;
     const members = p ? p.members : [];
     const invite = p ? `${location.origin}${location.pathname}?party=${p.code}` : '';
-    const modes = [['5v5', 'Competitive', '5v5 · First to 7'], ['2v2', 'Wingman', '2v2 · First to 7'], ['1v1', 'Duel', '1v1 · First to 7'], ['private', 'Private', 'Friends · Custom teams'], ['practice', 'Practice', 'Solo · Free roam']];
+    const modes = [['5v5', 'COMPETITIVE', 'Standard 5v5 bomb defusal. First to 7 rounds, full economy, halftime side swap.'],
+      ['2v2', 'WINGMAN', '2v2 on the same map. First to 7 rounds — quick, tactical, every duel counts.'],
+      ['1v1', 'DUEL', '1v1 aim and economy duel. First to 7 rounds.'],
+      ['private', 'PRIVATE', 'Play your party against itself. Pick teams on the right, from 1v1 up to 5v5.'],
+      ['practice', 'PRACTICE', 'Solo free-roam range: infinite money, every weapon, no bots. Place spawns for custom maps here.']];
     const size = p ? members.length : 1;
     const modeOk = (id) => id === 'practice' ? !p || p.leader : id === 'private' ? !!p : size <= +id[0];
     if (!modeOk(this.mode)) this.mode = modeOk('5v5') ? '5v5' : (p ? 'private' : 'practice');
+    const desc = modes.find((m) => m[0] === this.mode)[2];
     const myTeam = members.find((m) => m.id === mm.myId)?.team;
-    const teamList = (t) => members.filter((m) => m.team === t).map((m) => `<li>${h(m.name)}${m.leader ? ' <i class="crown">★</i>' : ''}${p.leader && m.id !== mm.myId ? ` <button class="mini" data-act="swapteam" data-id="${h(m.id)}" data-team="${t === TEAM.CT ? TEAM.T : TEAM.CT}">⇄</button>` : ''}</li>`).join('') || '<li class="empty">—</li>';
     const elapsed = q ? Math.floor((performance.now() - (this.queueStart || performance.now())) / 1000) : 0;
-    const playLabel = q ? 'CANCEL' : this.mode === 'practice' ? 'START' : this.mode === 'private' ? 'START MATCH' : 'PLAY';
+    const qtime = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
+    const playLabel = q ? `IN QUEUE <small id="q-time">${qtime}</small>` : this.mode === 'practice' ? 'START' : this.mode === 'private' ? 'START MATCH' : 'FIND MATCH';
+    const lineup = this.lineup();
+    const order = [3, 1, 0, 2, 4]; // visual slot -> lineup index (you in the centre)
+    const roles = ['ENTRY', 'RIFLER', 'IN-GAME LEADER', 'AWPER', 'SUPPORT'];
+    const emblem = '<svg viewBox="0 0 40 40" class="emb"><path d="M20 2l15 9v18l-15 9-15-9V11z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 24l8-6 8 6M12 18l8-6 8 6" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>';
+    const cards = order.map((li, slot) => {
+      const m = lineup[li];
+      if (!m) return `<div class="pcard empty ${slot === 2 ? 'mid' : ''}" data-slot="${slot}" data-act="invite"><div class="pc-frame"></div><div class="pc-plus">+</div><div class="pc-name"><span>INVITE</span><b>${p ? 'Copy invite link' : 'Create party'}</b></div></div>`;
+      return `<div class="pcard ${m.team === TEAM.T ? 't' : 'ct'} ${m.me ? 'me' : ''} ${slot === 2 ? 'mid' : ''}" data-slot="${slot}"><div class="pc-frame"></div>
+        <div class="pc-role">${roles[slot]}</div><div class="pc-view" data-view="${li}"></div>
+        <div class="pc-name"><span>${q ? 'IN QUEUE' : 'READY'}</span><b>${h(m.name)}</b><i>${m.leader ? '★ PARTY LEADER' : (m.team === TEAM.T ? 'TERRORIST' : 'COUNTER-TERRORIST')}</i></div>
+        <div class="pc-emb">${emblem}<small>UNRANKED</small></div></div>`;
+    }).join('');
+    const memberRows = members.map((m) => `<div class="soc-row ${m.team === TEAM.T ? 't' : 'ct'}"><i>${h(m.name.slice(0, 1).toUpperCase())}</i><div><b>${h(m.name)}${m.leader ? ' ★' : ''}${m.id === mm.myId ? ' (you)' : ''}</b><span>${q ? 'In queue' : 'In party'} · ${m.team === TEAM.T ? 'T' : 'CT'}</span></div>${p.leader && m.id !== mm.myId ? `<button class="mini" data-act="swapteam" data-id="${h(m.id)}" data-team="${m.team === TEAM.CT ? TEAM.T : TEAM.CT}">⇄</button>` : ''}</div>`).join('');
     this.el.innerHTML = `
-    <div class="lobby">
+    <div class="lobby v2 ${this.socOpen ? 'soc-open' : ''}">
       <nav class="lb-nav">
         <div class="logo"><span class="spark"></span>FLASH<b>POINT</b></div>
         <div class="lb-tabs"><button class="act">PLAY</button><button data-act="models">ARSENAL</button><button data-act="settings">SETTINGS</button><button data-act="controls">CONTROLS</button></div>
-        <div class="lb-me"><span class="dot ${mm.peer ? 'ok' : ''}"></span><input id="mm-name" maxlength="20" value="${h(app.settings.name)}" title="Callsign"></div>
+        <div class="lb-me"><button class="mini soc-toggle" data-act="soctoggle">PARTY</button><span class="dot ${mm.peer ? 'ok' : ''}"></span><input id="mm-name" maxlength="20" value="${h(app.settings.name)}" title="Callsign"></div>
       </nav>
-      ${q ? `<div class="lb-queue"><div class="pulse"></div><div class="qtxt"><b>SEARCHING FOR MATCH</b><span>${h({ '5v5': 'Competitive', '2v2': 'Wingman', '1v1': 'Duel' }[q.mode] || q.mode)} · <em id="q-time">${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}</em> · ${q.found}/${q.needed} players found</span></div><button class="qx" data-act="cancelq">✕</button></div>` : ''}
-      <div id="lb-plates" class="lb-plates"></div>
-      <aside class="lb-party">
-        <h3>PARTY ${p ? `<span class="pc">${members.length}/5</span>` : ''}</h3>
-        ${p ? `
-          <div class="code">CODE <b>${h(p.code)}</b></div>
-          <button class="primary sm" data-act="copy">Copy invite link</button>
-          <input class="invite" readonly value="${h(invite)}">
-          <div class="teams">
-            <div class="tcol ct"><h4>CT</h4><ul>${teamList(TEAM.CT)}</ul>${!p.leader && myTeam !== TEAM.CT ? '<button class="mini" data-act="myteam" data-team="1">Join CT</button>' : ''}</div>
-            <div class="tcol t"><h4>T</h4><ul>${teamList(TEAM.T)}</ul>${!p.leader && myTeam !== TEAM.T ? '<button class="mini" data-act="myteam" data-team="2">Join T</button>' : ''}</div>
-          </div>
-          <p class="hint small">Teams apply to Private matches. Queues keep the party together.</p>
-          <div class="row"><input id="mm-chat" placeholder="Party chat…" maxlength="120"><button class="mini" data-act="pchat">Send</button></div>
-          <button class="ghost sm" data-act="leave">Leave party</button>
-        ` : `
-          <p class="hint">Invite friends to queue together or play a private match.</p>
-          <button class="primary sm" data-act="create">Create party</button>
-          <div class="row"><input id="mm-code" maxlength="5" placeholder="PARTY CODE" autocomplete="off"><button class="mini" data-act="join">Join</button></div>
-        `}
-      </aside>
-      <div class="lb-bottom">
-        <div class="lb-modes">${modes.map(([id, n, sub]) => `<button class="lb-mode ${this.mode === id ? 'act' : ''}" data-act="mode" data-mode="${id}" ${modeOk(id) && !q ? '' : 'disabled'}><b>${n}</b><span>${sub}</span></button>`).join('')}</div>
-        <button class="lb-play ${q ? 'searching' : ''}" data-act="${q ? 'cancelq' : 'play'}" ${(!leader && !q) ? 'disabled' : ''}>${!leader && !q ? 'WAITING FOR LEADER' : playLabel}</button>
+      <div class="lb-modetabs">${modes.map(([id, n]) => `<button class="${this.mode === id ? 'act' : ''}" data-act="mode" data-mode="${id}" ${modeOk(id) && !q ? '' : 'disabled'}>${n}</button>`).join('')}</div>
+      <div class="lb-cards">${cards}</div>
+      <div class="lb-desc"><b>${modes.find((m) => m[0] === this.mode)[1]}</b> — ${desc}</div>
+      <div class="lb-actions">
+        <button class="lb-side" data-act="practice-now" ${q || (p && !p.leader) ? 'disabled' : ''}>PRACTICE</button>
+        <button class="lb-go ${q ? 'searching' : ''}" data-act="${q ? 'cancelq' : 'play'}" ${(!leader && !q) ? 'disabled' : ''}>${!leader && !q ? 'WAITING FOR LEADER' : playLabel}</button>
+        <button class="lb-side" data-act="${p ? 'leave' : 'create'}">${p ? 'LEAVE PARTY' : 'CREATE PARTY'}</button>
       </div>
+      <aside class="lb-social">
+        <div class="soc-head">PARTY <span>${p ? members.length : 1}/5</span></div>
+        ${p ? `<div class="soc-code"><span>CODE</span><b>${h(p.code)}</b><button class="mini" data-act="copy">COPY LINK</button></div><input class="invite" readonly value="${h(invite)}">
+          ${memberRows}
+          ${!p.leader ? `<div class="soc-team">Your side: <button class="mini ${myTeam === TEAM.CT ? 'on' : ''}" data-act="myteam" data-team="1">CT</button><button class="mini ${myTeam === TEAM.T ? 'on' : ''}" data-act="myteam" data-team="2">T</button></div>` : '<p class="hint small">⇄ moves a player between CT and T for Private matches.</p>'}
+          <div class="row"><input id="mm-chat" placeholder="Party chat…" maxlength="120"><button class="mini" data-act="pchat">SEND</button></div>`
+    : `<div class="soc-row ct"><i>${h(app.settings.name.slice(0, 1).toUpperCase())}</i><div><b>${h(app.settings.name)} (you)</b><span>Online</span></div></div>
+          <p class="hint small">Create a party and send the invite link, or join a friend's code.</p>`}
+        <div class="soc-join"><input id="mm-code" maxlength="5" placeholder="PARTY CODE" autocomplete="off"><button class="mini" data-act="join">JOIN</button></div>
+      </aside>
     </div>`;
     this._wireMain();
     this.plateKey = '';
   }
 
-  // Called every frame by the lobby renderer with projected screen positions of each operator
-  updatePlates(items) {
-    const el = $('lb-plates');
-    if (!el) return;
-    const key = items.map((i) => i.name + i.team + i.leader + i.empty).join('|');
-    if (key !== this.plateKey) {
-      this.plateKey = key;
-      el.innerHTML = items.map((i, k) => i.empty
-        ? `<div class="plate empty" data-k="${k}" data-act="invite"><b>+</b><span>INVITE</span></div>`
-        : `<div class="plate ${i.team === TEAM.T ? 't' : 'ct'} ${i.me ? 'me' : ''}" data-k="${k}"><b>${h(i.name)}</b><span>${i.leader ? '★ LEADER' : 'READY'}</span></div>`).join('');
-      el.querySelectorAll('[data-act=invite]').forEach((b) => b.addEventListener('click', () => this._act(this.partyInfo ? 'copy' : 'create')));
-    }
-    items.forEach((i, k) => {
-      const d = el.children[k];
-      if (d) { d.style.transform = `translate(${Math.round(i.x)}px, ${Math.round(i.y)}px) translate(-50%, 0)`; d.style.display = i.visible ? '' : 'none'; }
-    });
+  // Called every frame by the lobby renderer: returns screen rects of each card's 3D viewport
+  cardViews() {
     const qt = $('q-time');
     if (qt && this.queueStart) { const e = Math.floor((performance.now() - this.queueStart) / 1000); qt.textContent = `${Math.floor(e / 60)}:${String(e % 60).padStart(2, '0')}`; }
+    if (this.el.classList.contains('hidden')) return [];
+    return [...this.el.querySelectorAll('[data-view]')].map((v) => ({ index: +v.dataset.view, rect: v.getBoundingClientRect(), team: v.closest('.pcard').classList.contains('t') ? 2 : 1, me: v.closest('.pcard').classList.contains('me') }));
   }
 
   // MATCH FOUND accept screen
@@ -178,6 +177,9 @@ export class Menus {
     try {
       switch (act) {
         case 'mode': this.mode = data.mode; this.renderMain(); break;
+        case 'soctoggle': this.socOpen = !this.socOpen; this.el.querySelector('.lobby')?.classList.toggle('soc-open', this.socOpen); break;
+        case 'invite': await this._act(this.partyInfo ? 'copy' : 'create'); break;
+        case 'practice-now': app.startPractice(); break;
         case 'play':
           if (this.mode === 'practice') { app.startPractice(); break; }
           if (this.mode === 'private') { await this._act('private'); break; }

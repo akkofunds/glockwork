@@ -96,6 +96,7 @@ class App {
     $('boot').classList.add('hidden');
     this.menus.showMain();
     this.mm.on('match', (m) => this.startMatch(m));
+    this._ensureOwnMap(true).catch((e) => console.warn('map preload', e));
     // party invite links
     const code = new URLSearchParams(location.search).get('party');
     if (code) {
@@ -124,7 +125,7 @@ class App {
 
   async _onAssetChange(slot, tuneOnly) {
     if (slot === 'soldier') { await this.charFactory.rebuild(this.settings.quality); return; }
-    if (slot === 'map') return;
+    if (slot === 'map') { if (this.map) this.map.own = false; return; }
     if (tuneOnly) this.weaponLib.refreshTunes();
     else await this.weaponLib.load(this.settings.quality);
   }
@@ -218,13 +219,13 @@ class App {
     return m.desc;
   }
 
-  async _ensureOwnMap() {
+  async _ensureOwnMap(quiet = false) {
     if (this.map && this.map.own) return this.map;
-    this.showLoading('Building map…');
-    const m = await this._myMap();
-    m.own = true;
-    this._installMap(m);
-    this.hideLoading();
+    if (this._mapPromise) { if (!quiet) this.showLoading('Building map…'); const m = await this._mapPromise; if (!quiet) this.hideLoading(); return m; }
+    if (!quiet) this.showLoading('Building map…');
+    this._mapPromise = this._myMap().then((m) => { m.own = true; this._installMap(m); return m; }).finally(() => { this._mapPromise = null; });
+    const m = await this._mapPromise;
+    if (!quiet) this.hideLoading();
     return m;
   }
 
@@ -402,83 +403,95 @@ class App {
     }
   }
 
-  // ---------- 3D lobby lineup ----------
+  // ---------- Lobby: blurred map backdrop + a live 3D operator inside every party card ----------
   _buildLobby() {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x07090d);
-    scene.fog = new THREE.Fog(0x07090d, 260, 620);
-    scene.add(new THREE.HemisphereLight(0xbfd2ff, 0x2a2018, 1.1));
-    const key = new THREE.DirectionalLight(0xffe2c0, 2.4); key.position.set(-120, 220, -260); scene.add(key);
-    const rim = new THREE.DirectionalLight(0x5aa9ff, 1.6); rim.position.set(160, 120, 220); scene.add(rim);
-    const rim2 = new THREE.DirectionalLight(0xff8a1f, 1.0); rim2.position.set(-180, 90, 200); scene.add(rim2);
-    // floor with radial glow
-    const c = document.createElement('canvas'); c.width = c.height = 512;
-    const x = c.getContext('2d');
-    const g = x.createRadialGradient(256, 256, 10, 256, 256, 256);
-    g.addColorStop(0, '#2a3340'); g.addColorStop(0.45, '#151a22'); g.addColorStop(1, '#07090d');
-    x.fillStyle = g; x.fillRect(0, 0, 512, 512);
-    x.strokeStyle = 'rgba(255,138,31,0.35)'; x.lineWidth = 3;
-    for (const r of [120, 160]) { x.beginPath(); x.arc(256, 256, r, 0, Math.PI * 2); x.stroke(); }
-    const floorTex = new THREE.CanvasTexture(c); floorTex.colorSpace = THREE.SRGBColorSpace;
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(420, 64), new THREE.MeshBasicMaterial({ map: floorTex }));
-    floor.rotation.x = -Math.PI / 2; scene.add(floor);
-    // backdrop: angled panels with accent light strips
-    const panelMat = new THREE.MeshLambertMaterial({ color: 0x141922 });
-    const stripMat = new THREE.MeshBasicMaterial({ color: 0xff8a1f });
-    for (let i = -4; i <= 4; i++) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(70, 260, 6), panelMat);
-      const a = i * 0.16;
-      p.position.set(Math.sin(a) * 330, 130, Math.cos(a) * 330); p.rotation.y = a; scene.add(p);
-      const st = new THREE.Mesh(new THREE.BoxGeometry(2, 200, 1), i % 2 ? stripMat : new THREE.MeshBasicMaterial({ color: 0x5aa9ff }));
-      st.position.set(Math.sin(a) * 326 + Math.cos(a) * 36, 120, Math.cos(a) * 326 - Math.sin(a) * 36); st.rotation.y = a; scene.add(st);
-    }
-    const cam = new THREE.PerspectiveCamera(36, 1, 1, 2000);
-    this.lobby = { scene, cam, chars: [], key: '', t: 0 };
+    scene.add(new THREE.HemisphereLight(0xcfdcff, 0x3a2c1c, 1.3));
+    const key = new THREE.DirectionalLight(0xffe6c8, 2.6); key.position.set(-1, 2, -2.2); scene.add(key);
+    const rimB = new THREE.DirectionalLight(0x5aa9ff, 1.8); rimB.position.set(2, 1.2, 2); scene.add(rimB);
+    const rimO = new THREE.DirectionalLight(0xff8a1f, 1.2); rimO.position.set(-2, 0.8, 2); scene.add(rimO);
+    // card backdrops (gradient quads rendered with an ortho camera inside each card viewport)
+    const grad = (top, bottom) => {
+      const c = document.createElement('canvas'); c.width = 4; c.height = 256;
+      const x = c.getContext('2d'); const g = x.createLinearGradient(0, 0, 0, 256);
+      g.addColorStop(0, top); g.addColorStop(0.65, bottom); g.addColorStop(1, '#07090d');
+      x.fillStyle = g; x.fillRect(0, 0, 4, 256);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+    };
+    const quad = (tex) => { const sc = new THREE.Scene(); sc.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: tex, depthWrite: false, depthTest: false }))); return sc; };
+    const back = { 1: quad(grad('#1d3550', '#0d1520')), 2: quad(grad('#4a3214', '#1a130b')), me: quad(grad('#5a3410', '#1c1209')) };
+    const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    // blurred backdrop: map rendered tiny, then upscaled with bilinear filtering
+    const rt = new THREE.WebGLRenderTarget(64, 36, { depthBuffer: true });
+    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    const bgScene = new THREE.Scene();
+    const bgMat = new THREE.MeshBasicMaterial({ map: rt.texture, color: 0x8a8f99, depthWrite: false, depthTest: false });
+    bgScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bgMat));
+    const cam = new THREE.PerspectiveCamera(26, 0.5, 1, 2000);
+    this.lobby = { scene, back, orthoCam, rt, bgScene, cam, chars: [], key: '', t: 0, flyCam: new THREE.PerspectiveCamera(70, 16 / 9, 5, 20000) };
   }
 
   _lobbyFrame(dt) {
     if (!this.lobby) this._buildLobby();
     const L = this.lobby;
     L.t += dt;
+    const r = this.renderer.renderer;
+    const w = window.innerWidth, h = window.innerHeight;
+    // 1) backdrop: slow fly-over of the current map, rendered tiny and stretched = cheap blur
+    r.setScissorTest(false);
+    r.setViewport(0, 0, w, h);
+    if (this.map) {
+      const fc = L.flyCam;
+      const ext = Math.max(this.map.world.max[0] - this.map.world.min[0], this.map.world.max[2] - this.map.world.min[2]) * 0.3;
+      fc.position.set(Math.sin(L.t * 0.03) * ext, (this.map.world.max[1] || 400) * 0.9 + 200, Math.cos(L.t * 0.03) * ext);
+      fc.lookAt(0, 0, 0);
+      const rw = Math.max(32, Math.round(w / 14)), rh = Math.max(18, Math.round(h / 14));
+      if (L.rt.width !== rw || L.rt.height !== rh) L.rt.setSize(rw, rh);
+      fc.aspect = w / h; fc.updateProjectionMatrix();
+      r.setRenderTarget(L.rt); r.clear(); r.render(this.renderer.scene, fc); r.setRenderTarget(null);
+      r.clear(); r.render(L.bgScene, L.orthoCam);
+    } else {
+      r.setClearColor(0x0b0e13); r.clear();
+    }
+    // 2) operators for each party member, one per card viewport
     const members = this.menus.lineup();
-    const slots = [[0, 0], [-62, 22], [62, 22], [-122, 46], [122, 46]];
-    const key = members.map((m) => m.id + m.team).join('|') + '#' + this.charFactory.version + '#' + this.weaponLib.version;
-    if (key !== L.key) {
-      L.key = key;
+    const keyStr = members.map((m) => m.id + m.team).join('|') + '#' + this.charFactory.version + '#' + this.weaponLib.version;
+    if (keyStr !== L.key) {
+      L.key = keyStr;
       for (const c of L.chars) c.dispose();
+      const guns = ['ak47', 'ak47', 'awp', 'glock', 'knife'];
       L.chars = members.map((m, i) => {
         const ch = this.charFactory.make(m.team === 2 ? 2 : 1);
-        const wpn = ['ak47', 'awp', 'ak47', 'glock', 'ak47'][i];
-        ch.setWeapon(wpn, this.weaponLib.get(wpn));
+        ch.setWeapon(guns[i], this.weaponLib.get(guns[i]));
+        ch.x = i * 600;
         L.scene.add(ch.root);
-        ch.slot = slots[i];
         return ch;
       });
     }
-    L.chars.forEach((ch, i) => {
-      const t = L.t + i * 1.7;
-      ch.update(dt, { x: ch.slot[0], y: 0, z: ch.slot[1], yaw: (i === 0 ? 0.55 : (ch.slot[0] > 0 ? 0.85 : 0.3)) + Math.sin(t * 0.4) * 0.04, pitch: -0.42 + Math.sin(t * 0.8) * 0.03, duck: 0, vx: 0, vz: 0, onGround: true, alive: true });
-    });
-    const w = window.innerWidth, h = window.innerHeight;
-    const cam = L.cam;
-    cam.aspect = w / h;
-    const narrow = w / h < 1.2;
-    cam.fov = narrow ? 52 : 34;
-    cam.position.set(Math.sin(L.t * 0.08) * 14, 58, -230);
-    cam.lookAt(0, narrow ? 46 : 40, 20);
-    cam.updateProjectionMatrix();
-    // name plates under each operator, plus invite slots
-    const items = [];
-    const v = new THREE.Vector3();
-    for (let i = 0; i < 5; i++) {
-      const m = members[i];
-      v.set(slots[i][0], -2, slots[i][1]).project(cam);
-      items.push({ x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h + 6, visible: v.z < 1, empty: !m, name: m?.name || '', team: m?.team, me: m?.me, leader: m?.leader });
+    const views = this.menus.cardViews();
+    if (!views.length) return;
+    r.setScissorTest(true);
+    r.autoClear = false;
+    for (const v of views) {
+      const ch = L.chars[v.index];
+      const rc = v.rect;
+      if (!ch || rc.width < 4 || rc.height < 4) continue;
+      const x = rc.left, y = h - rc.bottom;
+      r.setViewport(x, y, rc.width, rc.height); r.setScissor(x, y, rc.width, rc.height);
+      r.clearDepth();
+      r.render(v.me ? L.back.me : L.back[v.team], L.orthoCam);
+      const t = L.t + v.index * 1.9;
+      ch.update(dt, { x: ch.x, y: 0, z: 0, yaw: 0.85 + Math.sin(t * 0.35) * 0.05, pitch: -0.62 + Math.sin(t * 0.7) * 0.03, duck: 0, vx: 0, vz: 0, onGround: true, alive: true });
+      const cam = L.cam;
+      cam.aspect = rc.width / rc.height;
+      cam.fov = 2 * Math.atan(46 / 150 / Math.min(1, cam.aspect * 2.1)) * 180 / Math.PI;
+      cam.position.set(ch.x - 10, 44, -150);
+      cam.lookAt(ch.x, 37, 0);
+      cam.updateProjectionMatrix();
+      r.render(L.scene, cam);
     }
-    this.menus.updatePlates(items);
-    const r = this.renderer.renderer;
-    r.clear();
-    r.render(L.scene, cam);
+    r.setScissorTest(false);
+    r.setViewport(0, 0, w, h);
   }
 }
 
