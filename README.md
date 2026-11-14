@@ -1,113 +1,98 @@
-# GLOCKWORK — Browser Tactical Shooter
+# Flashpoint
 
-A Three.js + PeerJS (WebRTC, no game server required) tactical FPS prototype:
-a heavily-detailed procedural Glock viewmodel (ADS, inspect, mag-drop reload,
-synthesized gunshot/mechanical audio), Source-style movement/bhop, two maps,
-and a Valorant-style lobby with P2P party chat.
+A peer-to-peer tactical bomb-defusal FPS that runs in the browser. It's 100% PvP with no bots. It's a static site: no database, no API keys and no backend, so it deploys straight to Vercel.
 
-## Run it locally
+## Deploy
 
-Browsers block ES module / fetch-from-`file://` for some setups, so serve it
-over HTTP rather than double-clicking `index.html`:
+1. Push this folder to a GitHub repository.
+2. In Vercel, choose **New Project**, import the repo, set Framework to **Other**, leave the build command empty and the output directory as `/`.
+3. Open the URL. That's it.
 
-```bash
-npx serve .
-# or
-python3 -m http.server 8080
-```
+To test locally, serve the folder with any static server (for example `npx serve .`) and open `http://localhost:3000`. ES modules don't work from `file://`.
 
-Then open the printed `localhost` URL. To test multiplayer, open a second
-tab (or have a friend open the link), host a party in one tab, and join
-with the Room ID in the other.
+## How multiplayer works
+
+- **Signalling:** the free PeerJS cloud broker introduces players. After that, all traffic is direct WebRTC between peers.
+- **Parties:** *Create party* gives a 5-character code and an invite link (`?party=XXXXX`).
+- **Public queues** (`1v1`, `2v2` Wingman, `5v5` Competitive): the first client to claim the queue's fixed coordinator ID matches everyone else. Parties always land on the same team.
+- **Private match:** the party leader hosts, with any split from 1v1 to 5v5.
+- **Host:** an elected browser runs the authoritative 64-tick simulation, including lag-compensated hit registration (500 ms rewind), economy and buy validation, rounds, bomb and grenades. Clients predict their own movement and weapons, reconcile with the host, and interpolate other players.
+- **Disconnects:** a player who leaves is removed, never replaced by a bot. If a whole team leaves, the remaining team wins by forfeit.
+- **Strict networks:** some mobile carriers and strict NATs need a TURN relay. Add one in `js/netconfig.js`. To self-host signalling, run `npx peerjs --port 9000` and open the game with `?signal=yourhost:9000`.
+
+## Your models
+
+Bundled in `assets/models/` (Draco geometry, 2048 px WebP textures):
+
+| Model | Used for |
+|---|---|
+| `ak47.glb` | AK-47, M4A1-S, MP9, MAC-10 |
+| `awp.glb` | AWP, SSG 08 |
+| `glock17.glb` | Glock-17, USP-S, P250, Desert Eagle |
+| `knife.glb` | Knife |
+
+Grenades and the C4 are small built-in models.
+
+**Map and Soldier:** open **ESC → Model & Map Manager**, choose the slot, and pick a `.glb` (file picker, drag-and-drop, or a path in the repo such as `assets/models/my_map.glb`). The file is stored in your browser (IndexedDB), so you only do it once per device.
+
+- **Hosting a private match on a custom map:** the map file streams to the other players automatically.
+- **Custom maps:**
+  - The map is auto-scaled, centred and given spatial-hashed collision.
+  - Set the T/CT spawns, bombsites A/B and the buy-zone radius in Practice using **Set … here**, with live markers.
+- **Soldier models:**
+  - Any humanoid `.glb` is normalised to 72 units tall and auto-rigged.
+  - Bones named `RightHand`, `hand_r`, `mixamorigRightHand` and similar are used to calibrate the rig.
+  - Weapons are held with two-bone IK at a socket in front of the chest, so they don't clip into the body.
+- **Alignment Tuner:** X/Y/Z, pitch/yaw/roll and scale sliders for every slot, with a live preview.
+
+With no custom files, the game uses the original built-in *Dunewatch* arena and a built-in operator.
+
+## Performance
+
+- **Competitive Low** (the default on phones, iPads and Chromebooks):
+  - Pixel ratio is capped at 1.0, with no shadows.
+  - Lambert shading, with model textures capped at 1024 px.
+  - Adaptive resolution keeps the frame rate up.
+- **Medium/High:** PCF shadows (1024²), ACES tone mapping and full 2048 px PBR textures.
+- **General:**
+  - The built-in map is about 8 draw calls.
+  - Effects use fixed pools (tracers, decals, particles, shells, smoke), so there's no garbage-collection stutter mid-round.
+  - The host simulation is driven by a Web Worker heartbeat, so a backgrounded host keeps ticking.
 
 ## Controls
 
-| Action | Input |
+| Action | Keys |
 |---|---|
 | Move | WASD |
-| Look | Mouse (click game to lock pointer) |
-| Jump / bhop | Space or scroll wheel (buffered — tap just before landing) |
-| Fire | Left mouse button |
-| Aim down sights | Hold right mouse button |
+| Jump | Space or mouse wheel (50 ms landing buffer for bhop) |
+| Walk | Shift |
+| Crouch | Ctrl or C |
+| Fire / alt-fire | Mouse 1 / Mouse 2 |
 | Reload | R |
-| Inspect weapon | Y |
-| Chat | Enter to open, type, Enter to send / Esc to cancel |
+| Use / defuse / swap weapon on the ground | E |
+| Drop | G |
+| Inspect | F |
+| Buy menu | B |
+| Scoreboard | Tab |
+| Switch weapon | 1–5 |
+| Last weapon | Q |
+| Chat / team chat | T / U |
+| Menu | Esc |
 
-Accuracy is tied to movement: standing still and grounded is near pinpoint;
-strafing or airborne opens up the spread a lot, same as CS:GO/Valorant. Aiming
-down sights (hold RMB) zooms the FOV, cuts spread further, and slows your
-movement speed — the classic trade mobility for accuracy tactical-shooter
-trade-off.
+Touch screens get dual-thumb controls automatically.
 
-## Architecture
+## Project layout
 
 ```
-index.html        lobby + HUD markup, loads CDN libs then game scripts in order
-css/style.css      all UI styling (lobby, HUD, chat, crosshair)
-js/maps.js         two arenas (shipyard, courtyard) — InstancedMesh for every
-                   repeated prop (containers, crates, pillars, columns) to
-                   keep draw calls low; simple collider list returned alongside
-js/weapon.js       GlockViewmodel — ~40-part procedural geometry (front/rear
-                   serrations, extractor, ejection port, slide stop, takedown
-                   lever, three-dot sights, stippled grip texture, witness-
-                   hole magazine, crowned muzzle), sway/bob/blowback/muzzle-
-                   flash, ADS pose blend, Y-inspect sequence, and a 3-phase
-                   mag-drop/seat reload animation
-js/audio.js        AudioFX — fully synthesized gunshot, mechanical click and
-                   mag-thunk SFX via the Web Audio API (no sample files)
-js/movement.js     MovementController — Source-engine ground accel+friction
-                   (instant counter-strafe), air-strafe acceleration, jump
-                   buffer window for uncapped bhop, box/cylinder/ramp collision
-js/network.js      NetworkManager — PeerJS host/join, star-topology relay for
-                   chat / state / match-start / kills
-js/ui.js           lobby DOM wiring, player cards, in-game chat box behaviour
-js/main.js         engine bootstrap, render loop, pointer lock, raycast
-                   shooting, remote-player interpolation, FPS counter
+index.html, css/style.css, vercel.json
+assets/models/*.glb          bundled weapon models
+js/main.js                   app, game loop, match lifecycle
+js/config.js                 weapons, economy, movement, match rules
+js/sim/                      deterministic shared simulation (movement, weapons, ballistics, grenades)
+js/net/                      PeerJS links, matchmaking, protocol, host, client
+js/world/                    collision hash, built-in arena, map manager, procedural textures
+js/render/                   renderer, characters + auto-rig, viewmodel, effects, weapon library
+js/ui/                       HUD, buy menu, menus
 ```
 
-No build step, no bundler, no server-side code — it's all static files, so
-it deploys anywhere that serves static assets.
-
-## Performance notes
-
-- All repeated map geometry (shipping containers, crates, pillars, cover
-  boxes, columns) is drawn with a single `THREE.InstancedMesh` per prop type,
-  so the whole map is a handful of draw calls regardless of prop count.
-- Materials are plain `MeshStandardMaterial` with small canvas-procedural
-  textures (no normal/roughness map file loading, no post-processing stack),
-  which is what keeps this light enough to sit well above 144 FPS on
-  mid-range GPUs.
-- Shadows are a single directional light with a 2048 PCFSoft shadow map —
-  the only shadow-casting light in the scene.
-
-## Known limitations / what I'd tackle next
-
-This was built and syntax-checked in a sandboxed environment without a
-browser/GPU, so while the code has been carefully reasoned through, **you
-should expect to do a short playtest pass** and file issues against:
-
-- Collision is a lightweight AABB/cylinder approximation, not a full physics
-  engine — it's tuned for the included maps but can be clipped at extreme
-  speeds (very high bhop chains).
-- Hit detection is a single raycast against remote players' simple capsule
-  meshes (no hitboxes/headshot multipliers yet).
-- No server-authoritative anti-cheat — it's a trust-based P2P relay through
-  the host, fine for playing with friends, not for a public competitive mode.
-- Weapon audio is synthesized (no footstep/ambient/voice audio yet).
-
-## Deploy to Vercel via GitHub
-
-From this folder:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: Glockwork tactical shooter"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-
-Then in Vercel: **New Project → Import** your repo. Framework preset:
-**Other** (static). No build command, no output directory override needed —
-it'll serve `index.html` from the repo root as-is.
+See `CREDITS.md` for model licences.

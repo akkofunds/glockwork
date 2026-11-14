@@ -1,270 +1,419 @@
-// main.js — Engine bootstrap, render loop, shooting, remote player sync, HUD.
+// Flashpoint — application bootstrap, game loop, match lifecycle (practice / private / public queue),
+// host ticker (Web Worker heartbeat so a backgrounded host keeps simulating) and input routing.
+import * as THREE from 'three';
+import { loadSettings, saveSettings } from './settings.js';
+import { AssetManager, idbGet, idbPut, hashBytes } from './assets.js';
+import { Matchmaker } from './net/matchmaking.js';
+import { MapManager, finalizeConfig } from './world/mapmanager.js';
+import { GameRenderer } from './render/renderer.js';
+import { ViewModel } from './render/viewmodel.js';
+import { Effects } from './render/effects.js';
+import { WeaponLibrary } from './render/weaponlib.js';
+import { CharacterFactory } from './render/character.js';
+import { AudioSystem } from './audio.js';
+import { Input } from './input.js';
+import { TouchControls } from './touch.js';
+import { HUD } from './ui/hud.js';
+import { BuyMenu } from './ui/buymenu.js';
+import { Menus } from './ui/menus.js';
+import { Host } from './net/host.js';
+import { GameClient } from './net/client.js';
+import { TICK_RATE } from './config.js';
+import { isTouchDevice, escapeHtml } from './util.js';
 
-(function () {
-  const net = new NetworkManager();
-  let scene, camera, renderer, clock;
-  let movement, weapon, mapData;
-  let remotePlayers = new Map(); // id -> {mesh, target:{x,y,z,yaw}, nameTag}
-  let myHP = 100;
-  let chatCtl = null;
-  let raf = null;
+const $ = (id) => document.getElementById(id);
 
-  // --- Mouse look state ---
-  let yaw = 0, pitch = 0;
-  let lastMouseDX = 0, lastMouseDY = 0;
-  let mouseDXAccum = 0, mouseDYAccum = 0;
+// In-page link pair used when this browser is the match host (zero-latency loopback).
+function loopPair() {
+  const mk = () => ({ local: true, open: true, closed: false, onMessage: null, onClose: null, peer: null,
+    send(d) { if (this.closed) return false; const data = typeof d === 'string' || d instanceof ArrayBuffer ? d : JSON.stringify(d); const p = this.peer; queueMicrotask(() => { if (!p.closed && p.onMessage) p.onMessage(data, p); }); return true; },
+    sendFast(d) { return this.send(d); },
+    close() { if (this.closed) return; this.closed = true; const p = this.peer; if (!p.closed) { p.closed = true; p.onClose && p.onClose(p); } } });
+  const a = mk(), b = mk(); a.peer = b; b.peer = a;
+  return [a, b];
+}
 
-  // --- ADS state ---
-  let isADS = false;
-  const HIP_FOV = 90;
-  const ADS_FOV = 55;
-
-  // --- FPS counter ---
-  let frameCount = 0, fpsTimer = 0;
-
-  // --- Networking tick ---
-  let netTickTimer = 0;
-  const NET_TICK = 1 / 20; // 20hz state sync is plenty for a small lobby
-
-  function initRenderer() {
-    const canvas = document.getElementById('gameCanvas');
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.outputColorSpace = THREE.SRGBColorSpace ?? renderer.outputColorSpace;
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+class App {
+  constructor() {
+    this.settings = loadSettings();
+    this.assets = new AssetManager();
+    this.assets.quality = this.settings.quality;
+    this.mm = new Matchmaker();
+    this.mm.name = this.settings.name;
+    this.mapManager = new MapManager();
+    this.renderer = new GameRenderer($('game'), this.settings.quality);
+    this.weaponLib = new WeaponLibrary(this.assets);
+    this.viewmodel = new ViewModel(this.weaponLib);
+    this.effects = new Effects(this.renderer.scene, this.settings.quality);
+    this.effects.setNadeFactory((type) => this.weaponLib.get(type));
+    this.charFactory = new CharacterFactory(this.assets);
+    this.audio = new AudioSystem();
+    this.audio.quality = this.settings.quality;
+    this.audio.setVolume(this.settings.volume);
+    this.input = new Input($('game'));
+    this.hud = new HUD(this.settings);
+    this.buyMenu = new BuyMenu((i) => this.client?.buy(i), (i) => this.client?.refund(i));
+    this.menus = new Menus(this);
+    this.client = null; this.host = null; this.map = null;
+    this.markersOn = false;
+    this.chatOpen = false;
+    this.fps = { frames: 0, t: 0, val: 0 };
+    if (isTouchDevice()) {
+      this.touch = new TouchControls($('touch'), (a, down) => this._action(a, down));
+      this.touch.sens = this.settings.touchSensitivity;
+      this.input.touch = this.touch;
+      this.touch.show(false);
+      document.body.classList.add('is-touch');
+    }
+    this.input.onAction = (a, down, e) => this._action(a, down, e);
+    this.input.onLockChange = (locked) => {
+      if (!locked) this._unlockAt = performance.now();
+      $('clickplay').classList.toggle('hidden', locked || !this.client);
+      if (!this.client) return;
+      if (!locked && !this.buyMenu.open && !this.chatOpen && !this.menus.escOpen && !this.input.touch) this.menus.openEsc();
+    };
+    this.renderer.onResize = () => this.viewmodel.setFov(this.settings.vmFov, this.renderer.aspect);
+    this.applySettings();
+    this.assets.onChange((slot, tuneOnly) => this._onAssetChange(slot, tuneOnly));
+    $('game').addEventListener('click', () => { this.audio.init(); if (this.client && !this.uiBlocking()) this.input.requestLock(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.audio.init(); });
+    $('chat-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { const v = e.target.value.trim(); if (v && this.client) this.client.chat(v, this.chatTeam); this.closeChat(); }
+      else if (e.key === 'Escape') this.closeChat();
+      e.stopPropagation();
     });
+    this.last = performance.now();
+    this._loop = this._loop.bind(this);
   }
 
-  function loadMap(mapKey) {
-    // Clear previous map/scene
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.05, 500);
-    camera.rotation.order = 'YXZ';
-
-    const builder = MAPS[mapKey] || MAPS.shipyard;
-    mapData = builder(scene);
-
-    movement = new MovementController(camera, mapData.colliders);
-    const spawn = mapData.spawnPoints[Math.floor(Math.random() * mapData.spawnPoints.length)];
-    movement.teleport(spawn.x, spawn.z);
-
-    weapon = new GlockViewmodel(camera);
-
-    // Rebuild remote player meshes for the new scene
-    remotePlayers.forEach(rp => scene.add(rp.mesh));
+  async init() {
+    $('boot-msg').textContent = 'Loading weapons…';
+    await this.weaponLib.load(this.settings.quality);
+    $('boot-msg').textContent = 'Preparing operators…';
+    await this.charFactory.rebuild(this.settings.quality);
+    $('boot').classList.add('hidden');
+    this.menus.showMain();
+    this.mm.on('match', (m) => this.startMatch(m));
+    // party invite links
+    const code = new URLSearchParams(location.search).get('party');
+    if (code) {
+      this.menus.toast('Joining party ' + code.toUpperCase() + '…');
+      this.mm.joinParty(code).catch((e) => this.menus.toast(e.type === 'peer-unavailable' ? 'Party not found or expired' : (e.message || 'Could not join party'), 'warn'));
+    }
+    requestAnimationFrame(this._loop);
   }
 
-  function makeRemotePlayerMesh(name) {
-    const group = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4655, roughness: 0.6, metalness: 0.2 });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.35, 1.0, 4, 8) : new THREE.CylinderGeometry(0.35, 0.35, 1.7, 8), bodyMat);
-    body.position.y = 0.9;
-    body.castShadow = true;
-    group.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), bodyMat);
-    head.position.y = 1.65;
-    head.castShadow = true;
-    group.add(head);
-    return group;
+  applySettings() {
+    const s = this.settings;
+    this.renderer.setFov(s.fov);
+    this.viewmodel.setFov(s.vmFov, this.renderer.aspect);
+    this.audio.setVolume(s.volume);
+    if (this.touch) this.touch.sens = s.touchSensitivity;
+    $('fps').classList.toggle('hidden', !s.showFps);
+    this.hud.lastXhair = '';
   }
 
-  function ensureRemotePlayer(id, name) {
-    if (remotePlayers.has(id)) return remotePlayers.get(id);
-    const mesh = makeRemotePlayerMesh(name);
-    scene.add(mesh);
-    const rp = { mesh, target: { x: 0, y: 0, z: 0, yaw: 0 }, current: { x: 0, y: 0, z: 0 } };
-    remotePlayers.set(id, rp);
-    return rp;
+  changeQuality(q) {
+    // Antialiasing / shadow maps require a fresh WebGL context; reload keeps everything consistent.
+    saveSettings(this.settings);
+    if (this.client) { this.menus.toast('New graphics preset applies after this match'); return; }
+    location.reload();
   }
 
-  function removeRemotePlayer(id) {
-    const rp = remotePlayers.get(id);
-    if (rp) { scene.remove(rp.mesh); remotePlayers.delete(id); }
+  async _onAssetChange(slot, tuneOnly) {
+    if (slot === 'soldier') { await this.charFactory.rebuild(this.settings.quality); return; }
+    if (slot === 'map') return;
+    if (tuneOnly) this.weaponLib.refreshTunes();
+    else await this.weaponLib.load(this.settings.quality);
+  }
+  async reloadModels(slot) { await this._onAssetChange(slot, false); }
+
+  uiBlocking() { return this.menus.escOpen || this.buyMenu.open || this.chatOpen || !this.client; }
+
+  resume() {
+    this.menus.closeEsc();
+    if (!this.input.touch) this.input.requestLock();
   }
 
-  // --- Pointer lock -------------------------------------------------------
-  function setupPointerLock() {
-    const canvas = document.getElementById('gameCanvas');
-    const overlay = document.getElementById('pointerLockOverlay');
-    overlay.addEventListener('click', () => canvas.requestPointerLock());
-    document.addEventListener('pointerlockchange', () => {
-      overlay.classList.toggle('hidden', document.pointerLockElement === canvas);
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement !== canvas) return;
-      const sensitivity = 0.0022;
-      yaw -= e.movementX * sensitivity;
-      pitch -= e.movementY * sensitivity;
-      pitch = THREE.MathUtils.clamp(pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
-      mouseDXAccum += e.movementX;
-      mouseDYAccum += e.movementY;
-    });
-    canvas.addEventListener('mousedown', (e) => {
-      if (document.pointerLockElement !== canvas) return;
-      if (e.button === 0) tryFire();
-      if (e.button === 2) setADS(true);
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 2) setADS(false);
-    });
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    window.addEventListener('blur', () => setADS(false));
-    window.addEventListener('keydown', (e) => {
-      const tag = (e.target && e.target.tagName) || '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.code === 'KeyR') weapon && weapon.startReload();
-      if (e.code === 'KeyY') weapon && weapon.startInspect();
-    });
-    document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement !== canvas) setADS(false);
-    });
+  openChat(team) {
+    if (!this.client) return;
+    this.chatOpen = true; this.chatTeam = team;
+    const i = $('chat-input'); i.classList.remove('hidden'); i.placeholder = team ? 'Team chat…' : 'Chat…'; i.value = '';
+    this.input.exitLock();
+    setTimeout(() => i.focus(), 0);
+  }
+  closeChat() {
+    this.chatOpen = false;
+    $('chat-input').classList.add('hidden'); $('chat-input').blur();
+    if (this.client && !this.input.touch) this.input.requestLock();
+  }
+  chatLine(name, text, team) {
+    const log = $('chat-log');
+    const d = document.createElement('div');
+    d.innerHTML = name ? `<b class="${team === 2 ? 't' : team === 1 ? 'ct' : ''}">${escapeHtml(name)}${team ? ' (team)' : ''}:</b> ${escapeHtml(text)}` : `<i>${escapeHtml(text)}</i>`;
+    log.appendChild(d);
+    while (log.children.length > 6) log.removeChild(log.firstChild);
+    setTimeout(() => d.classList.add('fade'), 8000);
   }
 
-  function setADS(active) {
-    if (isADS === active) return;
-    isADS = active;
-    weapon && weapon.setADS(active);
-    movement && movement.setADS(active);
-    document.getElementById('crosshair').classList.toggle('ads-hidden', active);
-    document.getElementById('adsVignette').classList.toggle('active', active);
-  }
-
-  // --- Shooting with movement-based accuracy spread -----------------------
-  function tryFire() {
-    if (chatCtl && chatCtl.isChatOpen()) return;
-    if (!weapon.canFire()) {
-      if (weapon.ammo === 0) weapon.startReload();
+  _action(a, down, e) {
+    const c = this.client;
+    if (!down) {
+      if (a === 'scores') this.hud.showScoreboard(false);
       return;
     }
-    weapon.fire();
-    updateAmmoHUD();
-
-    // Accuracy model: standing & grounded = pinpoint; moving/airborne = wide cone.
-    const speedFactor = lastMoveState ? lastMoveState.speedFactor : 0;
-    const airborne = lastMoveState ? lastMoveState.airborne : false;
-    const baseSpread = 0.0015;
-    const moveSpread = speedFactor * 0.045;
-    const airSpread = airborne ? 0.05 : 0;
-    const adsTightening = isADS ? 0.3 : 1;
-    const spread = (baseSpread + moveSpread + airSpread) * adsTightening;
-
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    dir.x += (Math.random() - 0.5) * spread;
-    dir.y += (Math.random() - 0.5) * spread;
-    dir.z += (Math.random() - 0.5) * spread;
-    dir.normalize();
-
-    const raycaster = new THREE.Raycaster(camera.getWorldPosition(new THREE.Vector3()), dir, 0.1, 200);
-    const hitTargets = [];
-    remotePlayers.forEach((rp, id) => hitTargets.push({ id, mesh: rp.mesh }));
-    const meshes = hitTargets.map(h => h.mesh);
-    const intersects = raycaster.intersectObjects(meshes, true);
-    if (intersects.length > 0) {
-      // Find which remote player owns the hit object
-      let hitObj = intersects[0].object;
-      let ownerId = null;
-      outer: for (const [id, rp] of remotePlayers) {
-        let o = hitObj;
-        while (o) { if (o === rp.mesh) { ownerId = id; break outer; } o = o.parent; }
+    if (a === 'menu') {
+      if (this.chatOpen) return this.closeChat();
+      if (performance.now() - (this._unlockAt || 0) < 350 && this.menus.escOpen) return; // Esc that just released pointer lock
+      if (this.buyMenu.open) { this.buyMenu.toggle(false); if (!this.input.touch) this.input.requestLock(); return; }
+      if (!c) { if (this.menus.escOpen) this.menus.closeEsc(); return; }
+      if (this.menus.escOpen) this.resume(); else { this.input.exitLock(); this.menus.openEsc(); }
+      return;
+    }
+    if (!c || !c.ready || this.chatOpen) return;
+    if (this.menus.escOpen) return;
+    if (this.buyMenu.open && /^slot(\d)$/.test(a)) { this.buyMenu.key(+a.slice(4)); return; }
+    switch (a) {
+      case 'slot1': c.selectSlot(1); break;
+      case 'slot2': c.selectSlot(2); break;
+      case 'slot3': c.selectSlot(3); break;
+      case 'slot4': c.selectSlot(4); break;
+      case 'slot5': c.selectSlot(5); break;
+      case 'lastweapon': c.selectSlot('last'); break;
+      case 'nextweapon': c.selectSlot('next'); break;
+      case 'inspect': c.inspect(); break;
+      case 'scores': this.hud.showScoreboard(true); break;
+      case 'buy': {
+        if (!c.ps.alive) break;
+        const open = !this.buyMenu.open;
+        this.buyMenu.toggle(open);
+        if (open) this.input.exitLock(); else if (!this.input.touch) this.input.requestLock();
+        break;
       }
-      if (ownerId) {
-        net.sendKill(net.localName, (net.players.get(ownerId) || {}).name || 'Agent');
+      case 'chat': if (e) e.preventDefault(); this.openChat(false); break;
+      case 'teamchat': if (e) e.preventDefault(); this.openChat(true); break;
+      case 'attack': if (c.ps && !c.ps.alive) c.cycleSpectate(); break;
+    }
+  }
+
+  showLoading(text) { $('loading').classList.remove('hidden'); $('loading-text').textContent = text; }
+  hideLoading() { $('loading').classList.add('hidden'); }
+
+  // ---------- maps ----------
+  async _myMap() {
+    const cfg = this.assets.slotConfig('map');
+    if (cfg.source === 'default') return this.mapManager.buildBuiltin(this.renderer.renderer, this.settings.quality);
+    const src = await this.assets.getBytes('map');
+    if (!src) return this.mapManager.buildBuiltin(this.renderer.renderer, this.settings.quality);
+    const m = await this.mapManager.buildGLB(src.bytes, this.settings.quality, src.name || 'Custom Map');
+    await idbPut('map_' + m.hash, { bytes: src.bytes, name: src.name });
+    return m;
+  }
+
+  async hostMapDesc() {
+    const m = await this._ensureOwnMap();
+    return m.desc;
+  }
+
+  async _ensureOwnMap() {
+    if (this.map && this.map.own) return this.map;
+    this.showLoading('Building map…');
+    const m = await this._myMap();
+    m.own = true;
+    this._installMap(m);
+    this.hideLoading();
+    return m;
+  }
+
+  _installMap(m) {
+    if (this._mapRoot && this._mapRoot !== m.root) this.renderer.scene.remove(this._mapRoot);
+    this._mapRoot = m.root;
+    this.map = m;
+    if (!m.root.parent) this.renderer.scene.add(m.root);
+    try { this.hud.setRadarImage(this.mapManager.renderRadar(this.renderer, m.root, m.world, this.settings.quality === 'low' ? 256 : 512)); } catch (e) { console.warn('radar', e); }
+    if (this.markersOn) this.markers(true);
+  }
+
+  async ensureMap(desc, cfg, requestBytes) {
+    if (this.map && this.map.desc.kind === desc.kind && (desc.kind === 'builtin' || this.map.desc.hash === desc.hash)) {
+      if (cfg) this.map.config = finalizeConfig(cfg, this.map.world);
+      return this.map;
+    }
+    let m;
+    if (desc.kind === 'builtin') m = await this.mapManager.buildBuiltin(this.renderer.renderer, this.settings.quality);
+    else {
+      let rec = await idbGet('map_' + desc.hash);
+      let bytes = rec?.bytes;
+      if (!bytes) {
+        bytes = await requestBytes();
+        const h = await hashBytes(bytes);
+        if (h !== desc.hash) throw new Error('Map transfer corrupted');
+        await idbPut('map_' + desc.hash, { bytes, name: desc.name });
       }
+      m = await this.mapManager.buildGLB(bytes, this.settings.quality, desc.name, cfg);
+    }
+    if (cfg) m.config = finalizeConfig(cfg, m.world);
+    this._installMap(m);
+    return m;
+  }
+
+  refreshSpawns() {
+    if (!this.map) return;
+    this.map.config = finalizeConfig(this.map.config, this.map.world);
+    if (this.host) this.host.cfg = this.map.config;
+    if (this.client) this.client.cfg = this.map.config;
+  }
+  markers(on) {
+    this.markersOn = on;
+    this.mapManager.showMarkers(this.renderer.scene, this.map?.config, on);
+  }
+
+  // ---------- match lifecycle ----------
+  _startTicker() {
+    this._stopTicker();
+    const src = `let t=null;onmessage=(e)=>{if(e.data==='start'){clearInterval(t);t=setInterval(()=>postMessage(0),${Math.floor(1000 / TICK_RATE / 2)});}else{clearInterval(t);}}`;
+    try {
+      this.ticker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      this.ticker.onmessage = () => this._hostTick();
+      this.ticker.postMessage('start');
+    } catch {
+      this.ticker = { iv: setInterval(() => this._hostTick(), 1000 / TICK_RATE / 2), terminate() { clearInterval(this.iv); } };
+    }
+    this.hostAcc = 0; this.hostLast = performance.now();
+  }
+  _stopTicker() { if (this.ticker) { this.ticker.terminate(); this.ticker = null; } }
+  _hostTick() {
+    if (!this.host) return;
+    const now = performance.now();
+    this.hostAcc += Math.min(250, now - this.hostLast);
+    this.hostLast = now;
+    const step = 1000 / TICK_RATE;
+    let n = 0;
+    while (this.hostAcc >= step && n < 8) { this.hostAcc -= step; this.host.update(); n++; }
+    if (n === 8) this.hostAcc = 0;
+  }
+
+  async startPractice() {
+    await this._teardown();
+    this.menus.hideMain();
+    this.menus.closeEsc();
+    try {
+      const map = await this._ensureOwnMap();
+      this.host = new Host({ mode: 'practice', roster: [], world: map.world, map: { desc: map.desc, config: map.config, bytes: map.bytes } });
+      this.host.onEnd = () => this.leaveMatch(null);
+      const [hl, cl] = loopPair();
+      this.host.addLink(hl);
+      this._startTicker();
+      this.client = new GameClient(this, cl, { mode: 'practice', isHost: true, peerId: 'local' });
+    } catch (e) {
+      console.error(e);
+      this.leaveMatch('Could not start practice: ' + (e.message || e));
     }
   }
 
-  function updateAmmoHUD() {
-    const ammoEl = document.getElementById('ammoValue');
-    ammoEl.innerHTML = `${weapon.ammo}<span class="ammo-reserve">/${weapon.reserve}</span>`;
-    document.getElementById('reloadPrompt').classList.toggle('hidden', !weapon.isReloading);
-  }
-
-  let lastMoveState = null;
-
-  // --- Main loop ------------------------------------------------------------
-  function animate() {
-    raf = requestAnimationFrame(animate);
-    const dt = Math.min(clock.getDelta(), 0.1);
-
-    movement.setLook(yaw, pitch);
-    lastMoveState = movement.update(dt);
-
-    // Smooth FOV zoom toward the ADS target
-    const targetFov = isADS ? ADS_FOV : HIP_FOV;
-    if (Math.abs(camera.fov - targetFov) > 0.05) {
-      camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
-      camera.updateProjectionMatrix();
-    }
-
-    const mdx = mouseDXAccum, mdy = mouseDYAccum;
-    mouseDXAccum = 0; mouseDYAccum = 0;
-    weapon.update(dt, mdx, mdy, lastMoveState.speedFactor, lastMoveState.isMoving, lastMoveState.airborne);
-    updateAmmoHUD();
-
-    // Interpolate remote players toward last received network state
-    remotePlayers.forEach(rp => {
-      rp.mesh.position.x += (rp.target.x - rp.mesh.position.x) * Math.min(1, dt * 10);
-      rp.mesh.position.z += (rp.target.z - rp.mesh.position.z) * Math.min(1, dt * 10);
-      rp.mesh.position.y += (rp.target.y - rp.mesh.position.y) * Math.min(1, dt * 10);
-      rp.mesh.rotation.y += (rp.target.yaw - rp.mesh.rotation.y) * Math.min(1, dt * 10);
-    });
-
-    // Network state tick
-    netTickTimer += dt;
-    if (netTickTimer >= NET_TICK) {
-      netTickTimer = 0;
-      net.sendState({ x: camera.position.x, y: camera.position.y - MOVE_EYE_OFFSET(), z: camera.position.z, yaw });
-    }
-
-    renderer.render(scene, camera);
-
-    frameCount++;
-    fpsTimer += dt;
-    if (fpsTimer >= 0.5) {
-      document.getElementById('fpsCounter').textContent = `${Math.round(frameCount / fpsTimer)} FPS`;
-      frameCount = 0; fpsTimer = 0;
+  async startMatch(match) {
+    await this._teardown();
+    this.mm.leaveQueue();
+    this.menus.hideMain();
+    this.showLoading('Match found! Connecting…');
+    this.audio.init();
+    this.audio.play('roundStart', 0.6);
+    try {
+      if (match.hostId === this.mm.myId) {
+        const map = match.mode === 'private' ? await this._ensureOwnMap() : await this.ensureMap({ kind: 'builtin', name: 'dunewatch' }, null);
+        this.host = new Host({ mode: match.mode, roster: match.roster, world: map.world, map: { desc: map.desc, config: map.config, bytes: map.bytes } });
+        this.host.onEnd = () => this.leaveMatch(null);
+        this.mm.gameLinkHandler = (link) => this.host && this.host.addLink(link);
+        const [hl, cl] = loopPair();
+        this.host.addLink(hl);
+        this._startTicker();
+        this.client = new GameClient(this, cl, { mode: match.mode, isHost: true, peerId: this.mm.myId });
+      } else {
+        let link = null, err = null;
+        for (let i = 0; i < 4 && !link; i++) {
+          try { link = await this.mm.connectToHost(match.hostId, { name: this.settings.name }); } catch (e) { err = e; await new Promise((r) => setTimeout(r, 1200)); }
+        }
+        if (!link) throw err || new Error('Could not reach host');
+        this.client = new GameClient(this, link, { mode: match.mode, isHost: false, peerId: this.mm.myId });
+      }
+    } catch (e) {
+      console.error(e);
+      this.leaveMatch('Could not connect to match: ' + (e.message || e.type || e));
     }
   }
 
-  function MOVE_EYE_OFFSET() { return 1.62; }
-
-  // --- Wire network player events to remote meshes -------------------------
-  function wireNetworkToGame() {
-    net.onPlayerState = (id, data) => {
-      const name = (net.players.get(id) || {}).name || 'Agent';
-      const rp = ensureRemotePlayer(id, name);
-      rp.target.x = data.x; rp.target.y = data.y; rp.target.z = data.z; rp.target.yaw = data.yaw || 0;
-    };
-    net.onPlayerLeft = (id) => removeRemotePlayer(id);
-    net.onKillFeed = (killer, victim) => UI.killFeedEntry(killer, victim);
+  onClientReady(client) {
+    this.hud.show(true);
+    this.viewmodel.setTeam(client.ps.team);
+    if (this.touch) this.touch.show(true);
+    else this.input.requestLock();
+    $('clickplay').classList.toggle('hidden', !!this.touch || this.input.locked);
+    this.hud.clearKillfeed();
   }
 
-  // --- Boot ------------------------------------------------------------------
-  function startMatch(mapKey, mode) {
-    isADS = false;
-    document.getElementById('lobby').classList.add('hidden');
-    document.getElementById('game').classList.remove('hidden');
-
-    initRenderer();
-    loadMap(mapKey);
-    setupPointerLock();
-    clock = new THREE.Clock();
-    chatCtl = UI.initGameChat(net, () => movement.resetKeys());
-    wireNetworkToGame();
-    updateAmmoHUD();
-    if (raf) cancelAnimationFrame(raf);
-    animate();
+  async _teardown() {
+    this._stopTicker();
+    if (this.client) { this.client.destroy(); this.client.link.close && this.client.link.close(); this.client = null; }
+    if (this.host) { this.host.destroy(); this.host = null; }
+    this.mm.gameLinkHandler = null;
+    this.buyMenu.toggle(false);
+    this.hud.showScoreboard(false);
+    this.hud.show(false);
+    if (this.touch) this.touch.show(false);
+    $('clickplay').classList.add('hidden');
+    this.viewmodel.setWeapon(null);
   }
 
-  window.addEventListener('DOMContentLoaded', () => {
-    UI.init(net, startMatch);
-  });
-})();
+  async leaveMatch(reason) {
+    if (this._leaving) return;
+    this._leaving = true;
+    try {
+      await this._teardown();
+      this.input.exitLock();
+      this.hideLoading();
+      this.menus.closeEsc();
+      this.menus.showMain(reason);
+    } finally { this._leaving = false; }
+  }
+
+  // ---------- frame loop ----------
+  _loop(now) {
+    requestAnimationFrame(this._loop);
+    const dt = Math.min(0.1, (now - this.last) / 1000);
+    this.last = now;
+    if (this.client) this.client.frame(dt);
+    else this._menuCamera(dt);
+    this.renderer.render(this.client && this.client.ready ? this.viewmodel : null);
+    this.renderer.adapt(dt);
+    // fps
+    const f = this.fps; f.frames++; f.t += dt;
+    if (f.t >= 0.5) {
+      f.val = Math.round(f.frames / f.t); f.frames = 0; f.t = 0;
+      if (this.settings.showFps) { const i = this.renderer.renderer.info; $('fps').textContent = `${f.val} fps · ${i.render.calls} draws · ${Math.round(i.render.triangles / 1000)}k tris · ${(this.renderer.scale * 100) | 0}%`; }
+    }
+  }
+
+  _menuCamera(dt) {
+    // slow fly-over of the map behind the menu
+    if (!this.map) {
+      if (!this._menuMapPending) {
+        this._menuMapPending = true;
+        this._ensureOwnMap().catch((e) => console.warn(e)).finally(() => { this._menuMapPending = false; });
+      }
+      return;
+    }
+    this._mt = (this._mt || 0) + dt * 0.04;
+    const cam = this.renderer.camera;
+    cam.position.set(Math.sin(this._mt) * 900, 520, 400 + Math.cos(this._mt) * 900);
+    cam.lookAt(0, 0, -200);
+    this.renderer.applyZoom(1);
+  }
+}
+
+const app = new App();
+window.__flashpoint = app;
+app.init().catch((e) => {
+  console.error(e);
+  $('boot-msg').textContent = 'Failed to start: ' + (e.message || e);
+});
+export { THREE };

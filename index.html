@@ -1,134 +1,70 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GLOCKWORK // Tactical FPS</title>
-<link rel="stylesheet" href="css/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1116">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="description" content="Flashpoint — a peer-to-peer tactical bomb-defusal FPS in the browser. 100% PvP, no bots.">
+  <title>Flashpoint</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230e1116'/%3E%3Cpath d='M36 6L14 36h14l-4 22 22-30H32z' fill='%23ff8a1f'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
 </head>
 <body>
+  <canvas id="game" tabindex="0"></canvas>
 
-  <!-- ============ LOBBY SCREEN ============ -->
-  <div id="lobby" class="screen">
-    <div class="lobby-bg"></div>
-    <header class="lobby-header">
-      <h1 class="logo">GLOCK<span>WORK</span></h1>
-    </header>
-
-    <div class="lobby-grid">
-
-      <!-- Party panel -->
-      <section class="panel party-panel">
-        <h2 class="panel-title">PARTY</h2>
-        <div id="playerCards" class="player-cards"></div>
-
-        <div class="party-actions">
-          <label class="field-label">YOUR NAME</label>
-          <input id="nameInput" class="tactical-input" maxlength="16" placeholder="AGENT_01" />
-
-          <div class="room-row">
-            <div class="room-id-box">
-              <label class="field-label">ROOM ID</label>
-              <div id="roomIdDisplay" class="room-id">— — — — — —</div>
-            </div>
-            <button id="copyInviteBtn" class="btn btn-secondary">COPY INVITE LINK</button>
-          </div>
-
-          <div class="room-row">
-            <input id="joinIdInput" class="tactical-input" placeholder="ENTER ROOM ID TO JOIN" />
-            <button id="joinBtn" class="btn btn-secondary">JOIN</button>
-          </div>
-          <button id="hostBtn" class="btn btn-secondary">HOST NEW PARTY</button>
-        </div>
-      </section>
-
-      <!-- Map selector -->
-      <section class="panel map-panel">
-        <h2 class="panel-title">MAP SELECT</h2>
-        <div class="map-grid">
-          <div class="map-card selected" data-map="shipyard">
-            <div class="map-thumb shipyard-thumb"></div>
-            <div class="map-name">OVERHAUL</div>
-            <div class="map-desc">Industrial Shipping Yard</div>
-          </div>
-          <div class="map-card" data-map="courtyard">
-            <div class="map-thumb courtyard-thumb"></div>
-            <div class="map-name">BASTION</div>
-            <div class="map-desc">Sandstone Courtyard</div>
-          </div>
-        </div>
-
-        <h2 class="panel-title mode-title">MODE</h2>
-        <div class="mode-row">
-          <button class="mode-btn selected" data-mode="ffa">FREE FOR ALL</button>
-          <button class="mode-btn" data-mode="tdm">TEAM DEATHMATCH</button>
-        </div>
-
-        <button id="startBtn" class="btn btn-primary start-btn">START MATCH</button>
-        <div id="lobbyStatus" class="lobby-status">Host a party or join one with a Room ID.</div>
-      </section>
-
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div id="alive-ct" class="avatars ct"></div>
+      <div class="score-box ct"><span id="score-ct">0</span></div>
+      <div id="timer-box"><div id="round-timer">0:00</div><div id="round-label">Round 1</div></div>
+      <div class="score-box t"><span id="score-t">0</span></div>
+      <div id="alive-t" class="avatars t"></div>
     </div>
+    <div id="radar-wrap"><canvas id="radar" width="200" height="200"></canvas><div id="callout"></div><div id="money">$800</div><div id="money-pop"></div></div>
+    <div id="killfeed"></div>
+    <div id="crosshair"><canvas id="xhair" width="128" height="128"></canvas></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="dmg-indicators"></div>
+    <div id="center-msg"></div>
+    <div id="banner"></div>
+    <div id="progress"><div id="progress-label"></div><div class="bar"><i id="progress-bar"></i></div></div>
+    <div id="speedo"></div>
+    <div id="hp-box"></div>
+    <div id="ammo-box"></div>
+    <div id="inv-list"></div>
+    <div id="chat-log"></div>
+    <input id="chat-input" class="hidden" maxlength="120" autocomplete="off">
+    <div id="scope-overlay"><i class="h"></i><i class="v"></i></div>
+    <div id="smoke-overlay"></div>
+    <div id="blood-overlay"></div>
+    <div id="flash-overlay"></div>
   </div>
+  <div id="clickplay" class="hidden">Click to play</div>
+  <div id="scoreboard" class="hidden"></div>
+  <div id="buymenu" class="hidden"></div>
+  <div id="touch" style="display:none"></div>
+  <div id="menu" class="hidden"></div>
+  <div id="esc-menu" class="hidden"></div>
+  <div id="loading" class="hidden"><div class="spinner"></div><div id="loading-text">Loading…</div></div>
+  <div id="boot"><div class="logo">FLASH<b>POINT</b></div><div class="spinner"></div><div id="boot-msg">Loading engine…</div>
+    <noscript>Flashpoint needs JavaScript and WebGL.</noscript></div>
+  <div id="toast"></div>
+  <div id="fps" class="hidden"></div>
 
-  <!-- ============ GAME SCREEN ============ -->
-  <div id="game" class="screen hidden">
-    <canvas id="gameCanvas"></canvas>
-
-    <div id="adsVignette" class="ads-vignette"></div>
-
-    <!-- Crosshair -->
-    <div id="crosshair" class="crosshair">
-      <span class="ch-dot"></span>
-      <span class="ch-line ch-top"></span>
-      <span class="ch-line ch-bottom"></span>
-      <span class="ch-line ch-left"></span>
-      <span class="ch-line ch-right"></span>
-    </div>
-
-    <!-- HUD -->
-    <div class="hud-bottom">
-      <div class="hud-health">
-        <div class="hud-label">HP</div>
-        <div id="hpValue" class="hud-value">100</div>
-      </div>
-      <div class="hud-ammo">
-        <div id="ammoValue" class="hud-value">12<span class="ammo-reserve">/36</span></div>
-        <div class="hud-label">GLOCK-18</div>
-      </div>
-    </div>
-
-    <div class="hud-top-left">
-      <div id="fpsCounter" class="fps-counter">144 FPS</div>
-    </div>
-
-    <div id="killFeed" class="kill-feed"></div>
-
-    <!-- Chat -->
-    <div id="chatLog" class="chat-log"></div>
-    <div id="chatInputWrap" class="chat-input-wrap hidden">
-      <input id="chatInput" class="chat-input" maxlength="140" placeholder="Say something..." />
-    </div>
-
-    <div id="reloadPrompt" class="reload-prompt hidden">RELOADING...</div>
-
-    <div id="pointerLockOverlay" class="pointer-lock-overlay">
-      <div class="plo-box">
-        <div class="plo-title">CLICK TO ENGAGE</div>
-        <div class="plo-sub">WASD move · LMB fire · RMB aim · R reload · Y inspect · Scroll/Space jump · Enter chat</div>
-      </div>
-    </div>
-  </div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
-
-  <script src="js/maps.js"></script>
-  <script src="js/audio.js"></script>
-  <script src="js/weapon.js"></script>
-  <script src="js/movement.js"></script>
-  <script src="js/network.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/main.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
