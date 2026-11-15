@@ -134,29 +134,20 @@ export class Menus {
     return [...this.el.querySelectorAll('[data-view]')].map((v) => ({ index: +v.dataset.view, rect: v.getBoundingClientRect(), team: v.closest('.pcard').classList.contains('t') ? 2 : 1, me: v.closest('.pcard').classList.contains('me') }));
   }
 
-  // MATCH FOUND accept screen
+  // MATCH FOUND splash (auto-accepted; closes as soon as the match loads)
   renderFound(f) {
     const el = $('found');
-    if (!f) { el.classList.add('hidden'); clearInterval(this.foundTimer); this.foundTimer = null; return; }
+    clearTimeout(this.foundTimeout);
+    if (!f) { el.classList.add('hidden'); return; }
     const isNew = el.classList.contains('hidden');
     el.classList.remove('hidden');
     const modeName = { '5v5': 'COMPETITIVE', '2v2': 'WINGMAN', '1v1': 'DUEL', tdm: 'TEAM DEATHMATCH' }[f.mode] || String(f.mode).toUpperCase();
     const dots = Array.from({ length: f.total }, (_, i) => `<i class="${i < f.accepted ? 'on' : ''}"></i>`).join('');
     el.innerHTML = `<div class="fd-box"><div class="fd-title">MATCH FOUND</div><div class="fd-sub">${modeName} · ${h(this.app.assets.manifest.mapName || (this.app.assets.manifest.map ? 'Custom map' : 'Dunewatch'))}</div>
-      <div class="fd-dots">${dots}</div>
-      <button class="fd-accept ${f.me ? 'done' : ''}" id="fd-accept">${f.me ? 'ACCEPTED' : 'ACCEPT'}</button>
-      <div class="fd-bar"><i id="fd-bar"></i></div><div class="fd-hint">${f.me ? 'Waiting for other players…' : 'Accept to join the match'}</div></div>`;
-    $('fd-accept').addEventListener('click', () => { this.app.audio.init(); this.app.audio.play('buy'); this.app.mm.acceptMatch(); });
+      <div class="fd-dots">${dots}</div><div class="fd-hint">Connecting to match…</div></div>`;
     if (isNew) { this.app.audio.init(); this.app.audio.play('win', 0.6); }
-    if (!this.foundTimer) {
-      this.foundTimer = setInterval(() => {
-        const ff = this.app.mm.found;
-        if (!ff) return;
-        const left = Math.max(0, ff.deadline - performance.now());
-        const bar = $('fd-bar'); if (bar) bar.style.width = (left / 150) + '%';
-        if (left <= 0 && !ff.me) { this.app.mm.found = null; this.renderFound(null); this.app.mm.leaveQueue(); this.toast('Match not accepted — removed from queue', 'warn'); }
-      }, 100);
-    }
+    // never trap the player: if the match doesn't start, drop the splash and keep searching
+    this.foundTimeout = setTimeout(() => { if (this.app.mm.found === f) { this.app.mm.found = null; } this.renderFound(null); }, 20000);
   }
 
   _wireMain() {

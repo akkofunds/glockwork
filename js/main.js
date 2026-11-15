@@ -319,6 +319,7 @@ class App {
   }
 
   async startMatch(match) {
+    this.menus.renderFound(null);
     await this._teardown();
     this.mm.leaveQueue();
     this.menus.hideMain();
@@ -350,6 +351,7 @@ class App {
   }
 
   onClientReady(client) {
+    this.menus.renderFound(null);
     this.hud.show(true);
     this.viewmodel.setTeam(client.ps.team);
     if (this.touch) this.touch.show(true);
@@ -372,6 +374,7 @@ class App {
   }
 
   async leaveMatch(reason) {
+    this.menus.renderFound(null);
     if (this._leaving) return;
     this._leaving = true;
     try {

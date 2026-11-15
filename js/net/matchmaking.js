@@ -323,6 +323,8 @@ export class Matchmaker extends Emitter {
     }
     if (this.party?.leader) for (const l of this.party.links.values()) l.send(m);
     this.emit('found', this.found);
+    // no accept button: everyone accepts automatically
+    if (m.t === 'found') setTimeout(() => this.acceptMatch(), 250);
   }
 
   acceptMatch() {
