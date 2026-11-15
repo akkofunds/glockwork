@@ -325,10 +325,30 @@ function estimateJoints(parts, bones) {
   j.neck = new THREE.Vector3(0, H * 0.83, 0);
   j.head = new THREE.Vector3(0, H * 0.875, 0);
   j.headTop = new THREE.Vector3(0, H, 0);
+  // Shoulder joints from the silhouette: scan down from the neck to where the shoulders flare out,
+  // then place the joint inside the deltoid (works for bulky vests / A-pose / T-pose alike).
+  const profile = (sg) => {
+    const bins = new Map();
+    for (let i = 0; i < all.length; i += 3) {
+      const x = all[i] * sg, y = all[i + 1];
+      if (x <= 0 || y < H * 0.6 || y > H * 0.95) continue;
+      const k = Math.round(y);
+      if (!bins.has(k) || bins.get(k) < x) bins.set(k, x);
+    }
+    const neckW = bins.get(Math.round(H * 0.88)) || H * 0.06;
+    for (let y = Math.round(H * 0.87); y > H * 0.66; y--) {
+      const w = bins.get(y) || 0;
+      if (w > Math.max(neckW * 1.8, H * 0.09)) {
+        let outer = 0; for (let k = y; k >= y - 2; k--) outer = Math.max(outer, bins.get(k) || 0);
+        return new THREE.Vector3(sg * outer * 0.72, y - 2.5, 0);
+      }
+    }
+    return new THREE.Vector3(sg * torso * 0.7, H * 0.79, 0);
+  };
   for (const side of ['R', 'L']) {
     const sg = side === 'R' ? 1 : -1;
     const hand = side === 'R' ? handR : handL;
-    const sh = findBone(bones, 'shoulder' + side) || new THREE.Vector3(sg * torso * 0.98, H * 0.795, 0);
+    const sh = findBone(bones, 'shoulder' + side) || profile(sg);
     const handB = findBone(bones, 'hand' + side);
     const handPos = handB || hand;
     const wrist = handB ? handB.clone() : handPos.clone().lerp(sh, 0.06);

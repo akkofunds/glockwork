@@ -167,8 +167,10 @@ export function autoRigGeometry(geometry, J) {
     }
     si[i * 4] = BONE_INDEX[b1];
     if (b2 && adjacent(b1, b2)) {
-      const p1 = Math.pow(Math.max(d1, 1e-3), 4), p2 = Math.pow(Math.max(d2, 1e-3), 4);
-      const w1 = p2 / (p1 + p2);
+      // sharp falloff: limb segments stay rigid (straight forearms/upper arms) and only blend right at the joint
+      const p1 = Math.pow(Math.max(d1, 1e-3), 14), p2 = Math.pow(Math.max(d2, 1e-3), 14);
+      let w1 = p2 / (p1 + p2);
+      if (w1 > 0.97) w1 = 1;
       si[i * 4 + 1] = BONE_INDEX[b2];
       sw[i * 4] = w1; sw[i * 4 + 1] = 1 - w1;
     } else sw[i * 4] = 1;
@@ -412,7 +414,8 @@ export class Character {
     } else if (cls === 'pistol') {
       const top = meta.top ?? 2.8;
       // aimed: arms extended, sights just below the eye line; relaxed: low ready at chest
-      const posA = new THREE.Vector3(1.0, eye.y - top - 3.6, eye.z - 17).sub(eye).applyQuaternion(aimQ).add(eye);
+      const reach = Math.max(17, this.armReach() * 0.86); // near-straight arms, scaled to this soldier's arm length
+      const posA = new THREE.Vector3(1.0, eye.y - top - 3.6, eye.z - reach).sub(eye).applyQuaternion(aimQ).add(eye);
       const posR = new THREE.Vector3(2.0, shoulderR.y - 9, shoulderR.z - 14);
       pos.lerpVectors(posR, posA, sm.aim);
       const pr = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.9 - 0.06, 0, 0, 'YXZ'));
@@ -453,6 +456,12 @@ export class Character {
       poleL = new THREE.Vector3(-0.15, -0.2, 1).applyQuaternion(root.quaternion);
     }
     twoBoneIK(B.upperArmL, B.forearmL, B.handL, left, poleL);
+  }
+
+  // shoulder-to-wrist length of the loaded soldier (model units)
+  armReach() {
+    if (!this._reach) { const J = this.joints; const a = J.upperArmR, b = J.forearmR, c = J.handR; this._reach = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) + Math.hypot(b.x - c.x, b.y - c.y, b.z - c.z); }
+    return this._reach;
   }
 
   _restModel(name) {
