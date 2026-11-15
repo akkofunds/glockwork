@@ -301,7 +301,7 @@ export class Character {
     this.alive = true;
     this.deathT = 0;
     this.kick = 0;
-    this.smooth = { speed: 0, mx: 0, mz: 0, duck: 0, air: 0 };
+    this.smooth = { speed: 0, mx: 0, mz: 0, duck: 0, air: 0, aim: 0 };
     this.c4 = null;
   }
 
@@ -345,6 +345,12 @@ export class Character {
     sm.mz = damp(sm.mz, speed > 5 ? fwd / speed : 1, 8, dt);
     sm.duck = damp(sm.duck, s.duck, 14, dt);
     sm.air = damp(sm.air, s.onGround ? 0 : 1, 10, dt);
+    sm.aim = damp(sm.aim, s.aiming ? 1 : 0, s.aiming ? 14 : 4, dt);
+    const wcls = WEAPONS[this.weaponId]?.cls || 'rifle';
+    const longGun = wcls === 'rifle' || wcls === 'sniper' || wcls === 'smg';
+    // bladed stance: torso turns so the support shoulder leads; head counter-rotates to keep looking forward
+    const blade = longGun ? -(0.42 + 0.18 * sm.aim) : wcls === 'pistol' ? -0.12 : wcls === 'knife' ? -0.3 : 0;
+    const settle = Math.max(0, 1 - sm.speed / 160); // full stance when standing, softer while running
     const crouch = sm.duck + (s.planting || s.defusing ? 0.8 : 0);
     const cr = Math.min(1, crouch);
     this.phase += (sm.speed * dt) / (cr > 0.5 ? 40 : 58) * Math.PI;
@@ -353,13 +359,15 @@ export class Character {
     // hips
     const hipDrop = cr * 13 + Math.abs(Math.sin(this.phase)) * strideAmp * 0.08;
     B.hips.position.set(R.hips.x, R.hips.y - hipDrop, R.hips.z + cr * 2.5);
-    B.hips.rotation.set(cr * 0.35, 0, 0);
+    B.hips.rotation.set(cr * 0.35, blade * 0.45 * settle, 0);
     // spine aim pitch (+ counter-lean from crouch)
     const pitch = clamp(s.pitch, -1.3, 1.3);
-    B.spine.rotation.set(pitch * 0.22 - cr * 0.2, Math.sin(this.phase) * 0.04 * strideAmp / 13, 0);
-    B.chest.rotation.set(pitch * 0.3 - cr * 0.1, 0, 0);
-    B.neck.rotation.set(pitch * 0.15, 0, 0);
-    B.head.rotation.set(pitch * 0.2, 0, 0);
+    const bl = blade * (0.55 + 0.45 * settle);
+    B.spine.rotation.set(pitch * 0.22 - cr * 0.2 + (longGun ? 0.06 : 0), bl * 0.3 + Math.sin(this.phase) * 0.04 * strideAmp / 13, 0, 'YXZ');
+    B.chest.rotation.set(pitch * 0.3 - cr * 0.1, bl * 0.25, 0, 'YXZ');
+    B.neck.rotation.set(pitch * 0.15, -bl * 0.45, 0, 'YXZ');
+    // cheek weld when aiming a long gun: head tips down and toward the stock
+    B.head.rotation.set(pitch * 0.2 + (longGun ? 0.12 * sm.aim : 0), -bl * 0.5, longGun ? -0.18 * sm.aim : 0, 'YXZ');
     this.model.updateMatrixWorld(true);
 
     // legs IK: foot targets in model space -> world
@@ -368,8 +376,9 @@ export class Character {
       const ph = this.phase + (side === 'R' ? 0 : Math.PI);
       const swing = Math.sin(ph) * strideAmp;
       const lift = Math.max(0, Math.cos(ph)) * strideAmp * 0.45;
-      const fx = (this._restModel('foot' + side).x) + sm.mx * swing * 0.6 + sg * cr * 1.5;
-      const fz = this._restModel('foot' + side).z - sm.mz * swing - sm.air * 4 + (cr > 0.5 ? (side === 'R' ? 3 : -5) : 0);
+      const stag = (longGun || wcls === 'knife' ? 1 : 0.5) * settle; // support foot forward, strong foot back
+      const fx = (this._restModel('foot' + side).x) + sm.mx * swing * 0.6 + sg * cr * 1.5 + sg * 2.2 * stag;
+      const fz = this._restModel('foot' + side).z - sm.mz * swing - sm.air * 4 + (cr > 0.5 ? (side === 'R' ? 3 : -5) : 0) + (side === 'R' ? 6 : -6) * stag;
       const fy = this._restModel('foot' + side).y + lift + sm.air * 9;
       const target = this.model.localToWorld(new THREE.Vector3(fx, fy, fz));
       const pole = new THREE.Vector3(0, 0, -1).applyQuaternion(root.quaternion);
@@ -377,39 +386,54 @@ export class Character {
       B['foot' + side].quaternion.identity();
     }
 
-    // weapon socket in model space ("aim frame": pivot between the shoulders, rotated by aim pitch)
-    const cls = WEAPONS[this.weaponId]?.cls || 'rifle';
+    // weapon socket in model space, anchored to the real shoulder and eye of whatever soldier model is loaded
+    const cls = wcls;
     const meta = this.weapon?.userData.meta || {};
-    const pivot = this._boneModelPos('chest').add(new THREE.Vector3(0, 5.5, 0));
     this.kick = Math.max(0, this.kick - dt * 10);
-    const pq = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, 0, 'YXZ'));
-    const eyeUp = 7.5; // eye height above the pivot
-    let hx, hy, hz, wpitch = 0;
-    if (cls === 'rifle' || cls === 'sniper' || cls === 'smg') {
-      // shouldered: butt in the right shoulder pocket, sights just under the eye
+    const shoulderR = this._boneModelPos('upperArmR');
+    const head = this._boneModelPos('head');
+    const eye = head.clone().add(new THREE.Vector3(0, 3.0, -3.0));
+    const aimQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, 0, 'YXZ'));
+    const relaxQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.45 - 0.26, 0.12, 0, 'YXZ'));
+    const pos = new THREE.Vector3(), q = new THREE.Quaternion();
+    if (longGun) {
       const rear = meta.rear ?? 11, top = meta.top ?? 3.5;
-      hy = eyeUp - top - 1.2;
-      hx = 5.6; hz = -1.0 - rear;
+      // aimed: butt in the shoulder pocket, sights under the eye
+      const buttA = new THREE.Vector3(shoulderR.x - 2.0, eye.y - top - 2.0, shoulderR.z - 0.5);
+      const posA = buttA.clone().add(new THREE.Vector3(0, 0, -rear).applyQuaternion(aimQ));
+      // relaxed (low/patrol ready): butt tucked under the armpit, muzzle forward and slightly down
+      const buttR = new THREE.Vector3(shoulderR.x - 3.0, shoulderR.y - 7.0, shoulderR.z - 2.5);
+      const posR = buttR.clone().add(new THREE.Vector3(0, 0, -rear).applyQuaternion(relaxQ));
+      pos.lerpVectors(posR, posA, sm.aim);
+      q.slerpQuaternions(relaxQ, aimQ, sm.aim);
     } else if (cls === 'pistol') {
-      hx = 2.2; hy = eyeUp - (meta.top ?? 2.8) - 3.0; hz = -17.5;
+      const top = meta.top ?? 2.8;
+      // aimed: arms extended, sights just below the eye line; relaxed: low ready at chest
+      const posA = new THREE.Vector3(1.0, eye.y - top - 2.2, eye.z - 18).sub(eye).applyQuaternion(aimQ).add(eye);
+      const posR = new THREE.Vector3(2.0, shoulderR.y - 12, shoulderR.z - 12);
+      pos.lerpVectors(posR, posA, sm.aim);
+      const pr = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.4 - 0.45, 0, 0, 'YXZ'));
+      q.slerpQuaternions(pr, aimQ, sm.aim);
     } else if (cls === 'knife') {
-      hx = 7.5; hy = -13.5; hz = -11; wpitch = 0.12;
+      pos.set(shoulderR.x - 1, shoulderR.y - 17, shoulderR.z - 11);
+      q.setFromEuler(new THREE.Euler(0.15, -0.1, 0, 'YXZ'));
     } else if (cls === 'grenade') {
-      hx = 7.5; hy = -3; hz = -7;
-    } else { hx = 0; hy = -11; hz = -10; }
-    hz += this.kick * 1.4;
+      pos.set(shoulderR.x, shoulderR.y - 6, shoulderR.z - 7); q.copy(relaxQ);
+    } else {
+      pos.set(0, shoulderR.y - 16, shoulderR.z - 10); q.copy(relaxQ);
+    }
     let tilt = 0;
-    if (s.reloading) { hy -= 2; tilt = 0.5; }
-    if (s.planting || s.defusing) { hy -= 6; hz += 2; }
-    const off = new THREE.Vector3(hx, hy, hz).applyQuaternion(pq);
-    this.weaponHolder.position.copy(pivot).add(off);
-    this.weaponHolder.quaternion.copy(pq).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.kick * 0.15 + wpitch, 0, tilt)));
+    if (s.reloading) { pos.y -= 2; tilt = 0.5; }
+    if (s.planting || s.defusing) { pos.y -= 6; pos.z += 2; }
+    pos.add(new THREE.Vector3(0, 0, this.kick * 1.4).applyQuaternion(q));
+    this.weaponHolder.position.copy(pos);
+    this.weaponHolder.quaternion.copy(q).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.kick * 0.12, 0, tilt)));
     this.weaponHolder.updateMatrixWorld(true);
 
     // arms IK to grip points
     const gripR = new THREE.Vector3(0, cls === 'knife' ? 0 : -0.6, cls === 'knife' ? 0.6 : 1.2);
     this.weaponHolder.localToWorld(gripR);
-    const poleR = new THREE.Vector3(1, -1.4, 0.5).applyQuaternion(root.quaternion);
+    const poleR = new THREE.Vector3(1, longGun ? -1.4 + 1.1 * sm.aim : -1.4, 0.5).applyQuaternion(root.quaternion);
     twoBoneIK(B.upperArmR, B.forearmR, B.handR, gripR, poleR);
     let left, poleL;
     if (meta.left && (cls === 'rifle' || cls === 'sniper' || cls === 'smg' || cls === 'pistol' || cls === 'c4')) {
@@ -417,7 +441,7 @@ export class Character {
       if (cls === 'pistol') left.set(-0.9, -1.4, 0.8);
       if (s.reloading) left.add(new THREE.Vector3(0, -3, 6));
       this.weaponHolder.localToWorld(left);
-      poleL = new THREE.Vector3(-1, -1.3, 0.2).applyQuaternion(root.quaternion);
+      poleL = new THREE.Vector3(-0.5, -1.4, 0.1).applyQuaternion(root.quaternion);
     } else {
       // free left arm hangs relaxed beside the hip
       left = this.model.localToWorld(this._boneModelPos('upperArmL').add(new THREE.Vector3(-2.2, -22, cls === 'knife' ? -3 : 0)));

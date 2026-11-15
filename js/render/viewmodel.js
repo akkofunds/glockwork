@@ -6,10 +6,10 @@ import { WEAPONS, TEAM } from '../config.js';
 import { damp, clamp, DEG } from '../util.js';
 
 const BASE = {
-  rifle: { p: [5.2, -6.6, -15.5], r: [0.02, 0.05, 0] },
+  rifle: { p: [5.6, -5.9, -14.5], r: [-0.02, 0.32, 0.1] },
   smg: { p: [4.8, -6.0, -14], r: [0.02, 0.05, 0] },
-  sniper: { p: [5.4, -6.8, -15.5], r: [0.02, 0.04, 0] },
-  pistol: { p: [3.9, -5.0, -15.5], r: [0.03, 0.08, 0] },
+  sniper: { p: [5.8, -6.2, -15], r: [-0.02, 0.28, 0.08] },
+  pistol: { p: [4.6, -6.6, -15.0], r: [0.06, 0.1, 0] },
   knife: { p: [5.4, -6.6, -12.5], r: [0.35, 0.35, -0.25] },
   grenade: { p: [5.0, -5.8, -12.5], r: [0.2, 0.2, 0] },
   c4: { p: [0.8, -7.2, -14], r: [0.5, 0, 0] },
@@ -80,8 +80,8 @@ export class ViewModel {
   }
 
   _buildHands() {
-    const glove = new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.85, metalness: 0.05 });
-    const knuckle = new THREE.MeshStandardMaterial({ color: 0x2c3036, roughness: 0.7 });
+    const glove = new THREE.MeshStandardMaterial({ color: 0x3a3e45, roughness: 0.8, metalness: 0.05 });
+    const knuckle = new THREE.MeshStandardMaterial({ color: 0x4a4f57, roughness: 0.7 });
     this.sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3b4a5b, roughness: 0.9 });
     const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 4, 10);
     const M = (g, m = glove) => new THREE.Mesh(g, m);
@@ -300,8 +300,10 @@ export class ViewModel {
     let left = null;
     if (meta.left && (cls === 'rifle' || cls === 'smg' || cls === 'sniper')) {
       left = this.handGuard;
-      left.position.copy(meta.left).add(new THREE.Vector3(0, -0.2 - leftDrop * 4, leftDrop * 5));
-      left.rotation.set(0, 0, 0);
+      // palm under the handguard, rolled toward the camera so the glove reads clearly
+      left.position.copy(meta.left).add(new THREE.Vector3(0.75, -0.55 - leftDrop * 4, leftDrop * 5));
+      left.rotation.set(0, 0, -0.55);
+      left.scale.setScalar(1.08);
     } else if (cls === 'pistol') {
       left = this.handCup;
       left.position.set(-0.35, -0.55, 0.35);

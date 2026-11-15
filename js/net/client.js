@@ -476,7 +476,7 @@ export class GameClient {
     for (const i of e.imp || []) app.effects.impact(i[0], i[1], i[2], i[3], i[4], i[5], false);
     if (e.blood) app.effects.blood(e.blood[0], e.blood[1], e.blood[2], dx / L, dz / L, false);
     if (e.blood && this.app.audio) app.audio.play3D('flesh', e.blood[0], e.blood[1], e.blood[2], 0.6);
-    if (r && r.char) r.char.fire();
+    if (r && r.char) { r.char.fire(); r.lastFireT = performance.now(); }
   }
 
   _detonate(e) {
@@ -592,7 +592,9 @@ export class GameClient {
       r.vx = damp(r.vx || 0, clamp(vx, -400, 400), 12, dt); r.vz = damp(r.vz || 0, clamp(vz, -400, 400), 12, dt);
       r.px = st.x; r.pz = st.z;
       const onGround = !!(st.flags & PF.GROUND);
-      r.char.update(dt, { x: st.x, y: st.y, z: st.z, yaw: st.yaw, pitch: st.pitch, duck: st.duck, vx: r.vx, vz: r.vz, onGround, alive, reloading: !!(st.flags & PF.RELOADING), planting: !!(st.flags & PF.PLANTING), defusing: !!(st.flags & PF.DEFUSING) });
+      if (st.flags & PF.FIRING) r.lastFireT = performance.now();
+      const aiming = (performance.now() - (r.lastFireT || -1e9) < 1300) || !!(st.flags & PF.SCOPED);
+      r.char.update(dt, { x: st.x, y: st.y, z: st.z, yaw: st.yaw, pitch: st.pitch, duck: st.duck, vx: r.vx, vz: r.vz, onGround, alive, aiming, reloading: !!(st.flags & PF.RELOADING), planting: !!(st.flags & PF.PLANTING), defusing: !!(st.flags & PF.DEFUSING) });
       r.char.attachC4(st.flags & PF.C4 ? this.c4Carried : null);
       // footsteps
       const sp = Math.hypot(r.vx, r.vz);
