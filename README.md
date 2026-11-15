@@ -70,7 +70,8 @@ With no manifest, the game uses the original built-in *Dunewatch* arena and a bu
 
 ## Movement
 
-- **Bhop:** hold Space (or the mobile JUMP button) to bunny hop automatically. Each clean hop adds a little speed, up to 360 u/s. In the air your momentum turns toward where you aim, so you don't need perfect A/D strafing.
+- **Bhop:** hold Space (or the mobile JUMP button) to bunny hop automatically. Each clean hop adds 6% speed, up to 460 u/s. Strong air-strafing (airaccelerate 26), and your momentum turns toward where you aim, so you don't need perfect A/D strafing.
+- **Crosshair:** small by default and climbs with the spray pattern so it shows where bullets land (toggle under ESC → Crosshair).
 - **Slopes and steps:** slopes up to about 53° and steps up to 22 units are climbed at full running speed.
 
 ## Lobby & queue

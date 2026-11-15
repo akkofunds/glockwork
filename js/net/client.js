@@ -755,8 +755,15 @@ export class GameClient {
       this._radarT = 0;
       hud.drawRadar(me, radarPlayers.filter((p) => !p.self), { visible: bombVisible, x: this.bomb.x, z: this.bomb.z, planted: this.bomb.state === 2 }, this.smokes, this.cfg, ps.alive ? this.yaw : (this.remotes.get(this.spectate)?.state?.yaw || this.yaw));
     }
-    // crosshair
+    // crosshair (rises with the spray pattern so it sits where bullets land)
     hud.drawCrosshair(ps.alive ? currentInaccuracy(ps) : 0);
+    if (ps.alive && app.settings.crosshair.recoil !== false) {
+      const ro = recoilOffset(ps, this._ro || (this._ro = [0, 0]));
+      const cam = app.renderer.camera;
+      const tv = Math.tan((cam.fov * DEG) / 2), th = tv * cam.aspect;
+      const h2 = window.innerHeight / 2, w2 = window.innerWidth / 2;
+      hud.setCrosshairOffset(Math.tan(-ro[0] * 0.55 * DEG) / th * w2 * -1, -Math.tan(ro[1] * 0.55 * DEG) / tv * h2);
+    } else hud.setCrosshairOffset(0, 0);
     // progress bars
     if (ps.alive && ps.w.plantStart >= 0) hud.progress('Planting bomb…', (ps.time - ps.w.plantStart) / MATCH.plantTime, 'plant');
     else if (this.bomb.defuser === this.num && this.bomb.state === 2) {

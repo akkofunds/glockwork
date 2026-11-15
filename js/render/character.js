@@ -227,16 +227,7 @@ export function buildTemplate(team, quality, soldier) {
       const sm = new THREE.SkinnedMesh(g, mat);
       meshes.push(sm);
     }
-    // team armbands (attached to bones so they follow the arms)
-    for (const s of ['R', 'L']) {
-      const a = J['upperArm' + s], b = J['forearm' + s];
-      const len = a.distanceTo(b);
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(2.75, 2.75, len * 0.12, 12, 1, true), new THREE.MeshBasicMaterial({ color: pal.band, side: THREE.DoubleSide }));
-      band.position.copy(b.clone().sub(a).multiplyScalar(0.3));
-      band.quaternion.setFromUnitVectors(V(0, 1, 0), b.clone().sub(a).normalize());
-      band.name = 'armband';
-      bones['upperArm' + s].add(band);
-    }
+    // team colour comes from the rim light (no extra armband meshes on custom soldiers)
   } else {
     const g = buildOperatorGeometry(team);
     const mat = quality === 'low'
@@ -386,37 +377,52 @@ export class Character {
       B['foot' + side].quaternion.identity();
     }
 
-    // weapon socket in model space
+    // weapon socket in model space ("aim frame": pivot between the shoulders, rotated by aim pitch)
     const cls = WEAPONS[this.weaponId]?.cls || 'rifle';
-    const hold = HOLD[cls] || HOLD.rifle;
+    const meta = this.weapon?.userData.meta || {};
     const pivot = this._boneModelPos('chest').add(new THREE.Vector3(0, 5.5, 0));
     this.kick = Math.max(0, this.kick - dt * 10);
     const pq = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, 0, 'YXZ'));
-    let hx = hold[0], hy = hold[1], hz = hold[2] + this.kick * 1.6;
+    const eyeUp = 7.5; // eye height above the pivot
+    let hx, hy, hz, wpitch = 0;
+    if (cls === 'rifle' || cls === 'sniper' || cls === 'smg') {
+      // shouldered: butt in the right shoulder pocket, sights just under the eye
+      const rear = meta.rear ?? 11, top = meta.top ?? 3.5;
+      hy = eyeUp - top - 1.2;
+      hx = 5.6; hz = -1.0 - rear;
+    } else if (cls === 'pistol') {
+      hx = 2.2; hy = eyeUp - (meta.top ?? 2.8) - 3.0; hz = -17.5;
+    } else if (cls === 'knife') {
+      hx = 7.5; hy = -13.5; hz = -11; wpitch = 0.12;
+    } else if (cls === 'grenade') {
+      hx = 7.5; hy = -3; hz = -7;
+    } else { hx = 0; hy = -11; hz = -10; }
+    hz += this.kick * 1.4;
     let tilt = 0;
     if (s.reloading) { hy -= 2; tilt = 0.5; }
     if (s.planting || s.defusing) { hy -= 6; hz += 2; }
     const off = new THREE.Vector3(hx, hy, hz).applyQuaternion(pq);
     this.weaponHolder.position.copy(pivot).add(off);
-    this.weaponHolder.quaternion.copy(pq).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.kick * 0.15 + (cls === 'knife' ? -0.6 : 0), 0, tilt)));
+    this.weaponHolder.quaternion.copy(pq).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.kick * 0.15 + wpitch, 0, tilt)));
     this.weaponHolder.updateMatrixWorld(true);
 
     // arms IK to grip points
-    const meta = this.weapon?.userData.meta;
-    const gripR = new THREE.Vector3(0, -0.4, 1.4);
+    const gripR = new THREE.Vector3(0, cls === 'knife' ? 0 : -0.6, cls === 'knife' ? 0.6 : 1.2);
     this.weaponHolder.localToWorld(gripR);
-    const poleR = new THREE.Vector3(1, -1.2, 0.6).applyQuaternion(root.quaternion);
+    const poleR = new THREE.Vector3(1, -1.4, 0.5).applyQuaternion(root.quaternion);
     twoBoneIK(B.upperArmR, B.forearmR, B.handR, gripR, poleR);
-    let left;
-    if (meta && meta.left && cls !== 'knife' && cls !== 'grenade') {
+    let left, poleL;
+    if (meta.left && (cls === 'rifle' || cls === 'sniper' || cls === 'smg' || cls === 'pistol' || cls === 'c4')) {
       left = meta.left.clone();
+      if (cls === 'pistol') left.set(-0.9, -1.4, 0.8);
       if (s.reloading) left.add(new THREE.Vector3(0, -3, 6));
       this.weaponHolder.localToWorld(left);
+      poleL = new THREE.Vector3(-1, -1.3, 0.2).applyQuaternion(root.quaternion);
     } else {
-      left = this._boneModelPos('upperArmL').add(new THREE.Vector3(-2.5, -21, cls === 'grenade' ? -6 : 1));
-      this.model.localToWorld(left);
+      // free left arm hangs relaxed beside the hip
+      left = this.model.localToWorld(this._boneModelPos('upperArmL').add(new THREE.Vector3(-2.2, -22, cls === 'knife' ? -3 : 0)));
+      poleL = new THREE.Vector3(-0.4, 0, 1).applyQuaternion(root.quaternion);
     }
-    const poleL = new THREE.Vector3(-1, -1.2, 0.6).applyQuaternion(root.quaternion);
     twoBoneIK(B.upperArmL, B.forearmL, B.handL, left, poleL);
   }
 

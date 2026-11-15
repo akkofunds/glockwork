@@ -484,7 +484,7 @@ class App {
       r.clearDepth();
       r.render(v.me ? L.back.me : L.back[v.team], L.orthoCam);
       const t = L.t + v.index * 1.9;
-      ch.update(dt, { x: ch.x, y: 0, z: 0, yaw: 0.85 + Math.sin(t * 0.35) * 0.05, pitch: -0.62 + Math.sin(t * 0.7) * 0.03, duck: 0, vx: 0, vz: 0, onGround: true, alive: true });
+      ch.update(dt, { x: ch.x, y: 0, z: 0, yaw: 0.62 + Math.sin(t * 0.35) * 0.05, pitch: 0.02 + Math.sin(t * 0.7) * 0.02, duck: 0, vx: 0, vz: 0, onGround: true, alive: true });
       const cam = L.cam;
       cam.aspect = rc.width / rc.height;
       cam.fov = 2 * Math.atan(46 / 150 / Math.min(1, cam.aspect * 2.1)) * 180 / Math.PI;

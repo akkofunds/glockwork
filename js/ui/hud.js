@@ -86,6 +86,15 @@ export class HUD {
     for (const r of rects) x.fillRect(r[0], r[1], r[2], r[3]);
   }
 
+  // Crosshair follows recoil: shows where the next bullet actually lands
+  setCrosshairOffset(px, py) {
+    const k = `${Math.round(px)}|${Math.round(py)}`;
+    if (this.cache.xoff === k) return;
+    this.cache.xoff = k;
+    const t = `translate(calc(-50% + ${Math.round(px)}px), calc(-50% + ${Math.round(py)}px))`;
+    document.getElementById('crosshair').style.transform = t;
+  }
+
   // ---------- radar ----------
   drawRadar(me, players, bomb, smokes, mapCfg, yaw) {
     const x = this.rctx, S = this.radar.width, m = S / 2;

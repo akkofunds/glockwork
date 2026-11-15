@@ -305,7 +305,8 @@ export class Menus {
       <div class="swatches">${['#4cff6a', '#00ffff', '#ffff00', '#ff3b3b', '#ffffff', '#ff7bff'].map((col) => `<i data-col="${col}" style="background:${col}"></i>`).join('')}</div>
       <label class="chk"><input type="checkbox" data-k="outline" ${c.outline ? 'checked' : ''}> Outline</label>
       <label class="chk"><input type="checkbox" data-k="dot" ${c.dot ? 'checked' : ''}> Centre dot</label>
-      <label class="chk"><input type="checkbox" data-k="dynamic" ${c.dynamic ? 'checked' : ''}> Dynamic (spreads with movement & firing)</label>`;
+      <label class="chk"><input type="checkbox" data-k="dynamic" ${c.dynamic ? 'checked' : ''}> Dynamic (spreads with movement & firing)</label>
+      <label class="chk"><input type="checkbox" data-k="recoil" ${c.recoil !== false ? 'checked' : ''}> Follow recoil (crosshair climbs with the spray)</label>`;
     const draw = () => {
       const cv = $('xh-prev'); const x = cv.getContext('2d');
       x.fillStyle = '#6b6152'; x.fillRect(0, 0, 160, 160);

@@ -80,25 +80,67 @@ export class ViewModel {
   }
 
   _buildHands() {
-    const glove = new THREE.MeshLambertMaterial({ color: 0x1b1d20 });
-    this.sleeveMat = new THREE.MeshLambertMaterial({ color: 0x3b4a5b });
-    // slim tactical gloves: palm, four finger segments wrapping the grip, thumb
-    const palmGeo = new THREE.BoxGeometry(1.5, 2.6, 2.2); palmGeo.translate(0, -1.0, 0.7);
-    const fingerGeo = new THREE.CylinderGeometry(0.34, 0.32, 1.9, 6); fingerGeo.rotateZ(Math.PI / 2);
-    const thumbGeo = new THREE.CylinderGeometry(0.36, 0.32, 1.8, 6); thumbGeo.rotateX(Math.PI / 2);
-    const mkHand = () => {
+    const glove = new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.85, metalness: 0.05 });
+    const knuckle = new THREE.MeshStandardMaterial({ color: 0x2c3036, roughness: 0.7 });
+    this.sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3b4a5b, roughness: 0.9 });
+    const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 4, 10);
+    const M = (g, m = glove) => new THREE.Mesh(g, m);
+    // ---- firing hand: origin = top of the pistol grip, grip runs down (-Y), muzzle toward -Z ----
+    const mkGripHand = () => {
       const h = new THREE.Group();
-      h.add(new THREE.Mesh(palmGeo, glove));
-      for (let i = 0; i < 4; i++) { const f = new THREE.Mesh(fingerGeo, glove); f.position.set(-0.15, -0.35 - i * 0.62, -0.55); h.add(f); }
-      const thumb = new THREE.Mesh(thumbGeo, glove); thumb.position.set(-0.85, 0.25, 0.1); thumb.rotation.y = 0.35; h.add(thumb);
+      const palm = M(cap(0.8, 1.7)); palm.scale.set(0.55, 1, 0.95); palm.position.set(0.62, -1.55, 0.45); palm.rotation.x = -0.2; h.add(palm);
+      const web = M(cap(0.42, 1.2), knuckle); web.rotation.x = Math.PI / 2; web.position.set(0.55, -0.35, 0.1); h.add(web);
+      // middle/ring/pinky wrapped around the front of the grip
+      for (let i = 0; i < 3; i++) {
+        const ring = M(new THREE.TorusGeometry(0.82 - i * 0.03, 0.33, 6, 14, Math.PI * 1.1));
+        ring.rotation.set(-Math.PI / 2, 0, -0.08); ring.scale.set(0.8, 1, 1.1); ring.position.set(0.08, -1.15 - i * 0.66, 0.05 + i * 0.12);
+        h.add(ring);
+      }
+      // thumb along the left side of the grip
+      const thumb = M(cap(0.3, 1.5)); thumb.rotation.set(Math.PI / 2 - 0.2, 0.35, 0); thumb.position.set(-0.62, -0.2, -0.35); h.add(thumb);
+      // trigger finger: pivots at the knuckle, rests on the trigger, curls back when firing
+      const pivot = new THREE.Group(); pivot.position.set(0.32, -0.42, -0.72);
+      const f1 = M(cap(0.27, 0.8)); f1.rotation.x = Math.PI / 2; f1.position.set(-0.12, -0.05, -0.55); pivot.add(f1);
+      const f2 = M(cap(0.25, 0.55)); f2.rotation.x = Math.PI / 2 + 0.75; f2.position.set(-0.2, -0.38, -1.2); pivot.add(f2);
+      h.add(pivot);
+      h.userData.trigger = pivot;
       return h;
     };
-    this.handR = mkHand(); this.handL = mkHand();
-    const armGeo = new THREE.CylinderGeometry(1.0, 1.45, 1, 12); armGeo.translate(0, 0.5, 0);
-    const cuffGeo = new THREE.CylinderGeometry(1.08, 1.08, 1.0, 12);
+    // ---- support hand on a handguard (axis along Z): palm underneath, fingers up the left side ----
+    const mkGuardHand = () => {
+      const h = new THREE.Group();
+      const palm = M(cap(0.8, 1.6)); palm.rotation.x = Math.PI / 2; palm.scale.set(1, 1, 0.6); palm.position.set(0.15, -1.25, 0.2); h.add(palm);
+      for (let i = 0; i < 4; i++) {
+        const ring = M(new THREE.TorusGeometry(1.05, 0.28, 6, 12, Math.PI * 0.95));
+        ring.rotation.set(0, 0, Math.PI * 0.62); ring.position.set(0, -0.1, -0.85 + i * 0.6); ring.scale.set(1, 1.05, 1);
+        h.add(ring);
+      }
+      const thumb = M(cap(0.3, 1.3)); thumb.rotation.x = Math.PI / 2; thumb.position.set(1.0, -0.45, -0.3); h.add(thumb);
+      return h;
+    };
+    // ---- knife fist (handle axis along Z) ----
+    const mkFist = () => {
+      const h = new THREE.Group();
+      const palm = M(cap(0.85, 1.7)); palm.rotation.x = Math.PI / 2; palm.scale.set(0.65, 1, 1); palm.position.set(0.95, -0.1, 0.1); h.add(palm);
+      for (let i = 0; i < 4; i++) {
+        const ring = M(new THREE.TorusGeometry(0.82, 0.3, 6, 12, Math.PI * 1.45));
+        ring.rotation.set(0, 0, -Math.PI * 0.55); ring.position.set(0, 0, -1.1 + i * 0.62);
+        h.add(ring);
+      }
+      const thumb = M(cap(0.3, 1.4)); thumb.rotation.x = Math.PI / 2; thumb.position.set(0.25, 0.85, -0.9); h.add(thumb);
+      return h;
+    };
+    this.handR = mkGripHand();
+    this.handGuard = mkGuardHand();
+    this.handCup = mkGripHand(); this.handCup.scale.x = -1; this.handCup.userData.trigger.visible = false;
+    this.fist = mkFist();
+    this.handL = this.handGuard;
+    const armGeo = new THREE.CylinderGeometry(1.05, 1.5, 1, 14); armGeo.translate(0, 0.5, 0);
+    const cuffGeo = new THREE.CylinderGeometry(1.12, 1.12, 1.0, 14);
     this.armR = new THREE.Mesh(armGeo, this.sleeveMat); this.armL = new THREE.Mesh(armGeo, this.sleeveMat);
     this.cuffR = new THREE.Mesh(cuffGeo, glove); this.cuffL = new THREE.Mesh(cuffGeo, glove);
     this.scene.add(this.armR, this.armL, this.cuffR, this.cuffL);
+    this.trigT = 0;
   }
 
   setTeam(team) {
@@ -130,6 +172,7 @@ export class ViewModel {
   }
 
   onFire(cls) {
+    this.trigT = 0.11;
     const big = cls === 'sniper' ? 2.4 : cls === 'pistol' ? 1.2 : cls === 'smg' ? 0.8 : 1.0;
     this.t.kick = Math.min(3, this.t.kick + 1.4 * big);
     this.t.kickRot = Math.min(0.35, this.t.kickRot + 0.05 * big);
@@ -235,31 +278,53 @@ export class ViewModel {
     // hands
     this.root.updateMatrixWorld(true);
     const meta = this.weapon.userData.meta || {};
-    this.weapon.add(this.handR);
-    this.handR.position.set(cls === 'knife' ? 0 : 0.15, cls === 'knife' ? 0.6 : -0.1, cls === 'knife' ? 1.6 : 0.5);
-    this.handR.rotation.set(cls === 'pistol' ? -0.3 : -0.2, 0, 0);
-    const twoHanded = meta.left && cls !== 'knife' && cls !== 'grenade';
-    if (twoHanded) {
-      this.weapon.add(this.handL);
-      this.handL.visible = true;
-      this.handL.position.copy(meta.left).add(new THREE.Vector3(-0.3, -0.6 - leftDrop * 4, leftDrop * 4));
-      this.handL.rotation.set(cls === 'pistol' ? -0.2 : 0.1, cls === 'pistol' ? 0.4 : 0, cls === 'pistol' ? 0 : 0.5);
-    } else if (cls === 'c4') {
-      this.weapon.add(this.handL);
-      this.handL.visible = true;
-      this.handL.position.set(-2.8, -0.6, 1.5); this.handL.rotation.set(0, 0, 0);
+    const L = meta.length || 12;
+    for (const hnd of [this.handR, this.handGuard, this.handCup, this.fist]) if (hnd.parent !== this.weapon) this.weapon.add(hnd);
+    this.handGuard.visible = this.handCup.visible = this.fist.visible = false;
+    this.trigT = Math.max(0, this.trigT - dt);
+    const pull = this.trigT > 0 ? Math.sin((1 - this.trigT / 0.11) * Math.PI) : 0;
+    this.handR.userData.trigger.rotation.x = pull * 0.55;
+    if (cls === 'knife') {
+      // fist around the handle (handle sits just behind the grip origin), thumb along the spine
+      this.handR.visible = false;
+      this.fist.visible = true;
+      this.fist.position.set(0, 0.25, -0.2);
+      this.fist.rotation.set(0, 0, 0);
+      this.handL = this.fist;
     } else {
-      this.handL.visible = false;
+      this.handR.visible = true;
+      this.handR.position.set(0, 0, 0);
+      this.handR.rotation.set(cls === 'pistol' ? -0.22 : -0.28, 0, 0);
+      this.handL = this.handR;
     }
+    let left = null;
+    if (meta.left && (cls === 'rifle' || cls === 'smg' || cls === 'sniper')) {
+      left = this.handGuard;
+      left.position.copy(meta.left).add(new THREE.Vector3(0, -0.2 - leftDrop * 4, leftDrop * 5));
+      left.rotation.set(0, 0, 0);
+    } else if (cls === 'pistol') {
+      left = this.handCup;
+      left.position.set(-0.35, -0.55, 0.35);
+      left.rotation.set(-0.22, 0.05, 0.04);
+      left.scale.set(-0.96, 0.96, 0.96);
+    } else if (cls === 'c4') {
+      left = this.handGuard;
+      left.position.set(-2.6, -0.4, 1.0); left.rotation.set(0, 0, 0.6);
+    }
+    if (left) left.visible = this.root.visible;
+    this.leftHand = left;
+    this.rightHand = cls === 'knife' ? this.fist : this.handR;
     this.weapon.updateMatrixWorld(true);
-    this._arm(this.handR, this.armR, this.cuffR, new THREE.Vector3(10, -15, 4), true);
-    this._arm(this.handL, this.armL, this.cuffL, new THREE.Vector3(cls === 'pistol' ? -2 : -7, -15, 4), this.handL.visible && this.root.visible);
+    this._arm(this.rightHand, this.armR, this.cuffR, new THREE.Vector3(10, -15, 4), true, cls === 'knife');
+    if (this.leftHand) this._arm(this.leftHand, this.armL, this.cuffL, new THREE.Vector3(cls === 'pistol' ? -3 : -8, -15, 4), this.root.visible, this.leftHand === this.handGuard);
+    else this.armL.visible = this.cuffL.visible = false;
   }
 
-  _arm(hand, arm, cuff, elbow, visible) {
+  _arm(hand, arm, cuff, elbow, visible, axial = false) {
     arm.visible = cuff.visible = visible && this.holder.visible;
     if (!arm.visible) return;
-    const w = new THREE.Vector3(0, -1.6, 1.8);
+    // wrist: behind the palm (grip hands) or under/behind the fist (hands around a horizontal axis)
+    const w = axial ? new THREE.Vector3(0.6, -1.2, 1.9) : new THREE.Vector3(0.8, -2.6, 1.3);
     hand.localToWorld(w);
     const dir = elbow.clone().sub(w);
     const len = dir.length();

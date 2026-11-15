@@ -227,6 +227,8 @@ export function normalizeWeapon(scene, key, quality, calibration) {
     left: leftFrac ? (target < 16 ? new THREE.Vector3(-0.9, -0.6, 0.4) : new THREE.Vector3(0, b.min.y + H * leftFrac[1] - 0, b.max.z - L * leftFrac[0])) : null,
     eject: new THREE.Vector3(b.max.x, b.max.y * 0.6, b.min.z + L * 0.55),
     length: L,
+    rear: Math.max(0, b.max.z), // grip -> butt distance (stock length)
+    top: Math.max(0, b.max.y), // height of the sights above the grip
   };
   return group;
 }
