@@ -345,7 +345,9 @@ export class Character {
     sm.mz = damp(sm.mz, speed > 5 ? fwd / speed : 1, 8, dt);
     sm.duck = damp(sm.duck, s.duck, 14, dt);
     sm.air = damp(sm.air, s.onGround ? 0 : 1, 10, dt);
-    sm.aim = damp(sm.aim, s.aiming ? 1 : 0, s.aiming ? 14 : 4, dt);
+    // ready (shouldered) by default like CS2; only lowered a little while sprinting and not shooting
+    const aimTarget = s.aiming ? 1 : Math.max(0.35, 1 - Math.max(0, sm.speed - 150) / 140);
+    sm.aim = damp(sm.aim, aimTarget, aimTarget > sm.aim ? 14 : 5, dt);
     const wcls = WEAPONS[this.weaponId]?.cls || 'rifle';
     const longGun = wcls === 'rifle' || wcls === 'sniper' || wcls === 'smg';
     // bladed stance: torso turns so the support shoulder leads; head counter-rotates to keep looking forward
@@ -400,7 +402,7 @@ export class Character {
     if (longGun) {
       const rear = meta.rear ?? 11, top = meta.top ?? 3.5;
       // aimed: butt in the shoulder pocket, sights under the eye
-      const buttA = new THREE.Vector3(shoulderR.x - 2.0, eye.y - top - 2.0, shoulderR.z - 0.5);
+      const buttA = new THREE.Vector3(shoulderR.x - 1.4, eye.y - top - 3.2, shoulderR.z - 0.5);
       const posA = buttA.clone().add(new THREE.Vector3(0, 0, -rear).applyQuaternion(aimQ));
       // relaxed (low/patrol ready): butt tucked under the armpit, muzzle forward and slightly down
       const buttR = new THREE.Vector3(shoulderR.x - 2.6, shoulderR.y - 5.5, shoulderR.z - 2.0);
@@ -410,14 +412,15 @@ export class Character {
     } else if (cls === 'pistol') {
       const top = meta.top ?? 2.8;
       // aimed: arms extended, sights just below the eye line; relaxed: low ready at chest
-      const posA = new THREE.Vector3(1.0, eye.y - top - 2.2, eye.z - 18).sub(eye).applyQuaternion(aimQ).add(eye);
+      const posA = new THREE.Vector3(1.0, eye.y - top - 3.6, eye.z - 17).sub(eye).applyQuaternion(aimQ).add(eye);
       const posR = new THREE.Vector3(2.0, shoulderR.y - 9, shoulderR.z - 14);
       pos.lerpVectors(posR, posA, sm.aim);
       const pr = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.9 - 0.06, 0, 0, 'YXZ'));
       q.slerpQuaternions(pr, aimQ, sm.aim);
     } else if (cls === 'knife') {
-      pos.set(shoulderR.x - 1, shoulderR.y - 17, shoulderR.z - 11);
-      q.setFromEuler(new THREE.Euler(0.15, -0.1, 0, 'YXZ'));
+      // natural forward grip: hand in front of the hip, blade angled forward and slightly down
+      pos.set(shoulderR.x - 0.5, shoulderR.y - 21, shoulderR.z - 8);
+      q.setFromEuler(new THREE.Euler(-0.32, -0.08, 0.1, 'YXZ'));
     } else if (cls === 'grenade') {
       pos.set(shoulderR.x, shoulderR.y - 6, shoulderR.z - 7); q.copy(relaxQ);
     } else {
@@ -432,7 +435,7 @@ export class Character {
     this.weaponHolder.updateMatrixWorld(true);
 
     // arms IK to grip points
-    const gripR = new THREE.Vector3(0, cls === 'knife' ? 0 : -0.6, cls === 'knife' ? 0.6 : 1.2);
+    const gripR = new THREE.Vector3(0, cls === 'knife' ? -0.3 : -0.6, cls === 'knife' ? 0.2 : 1.2);
     this.weaponHolder.localToWorld(gripR);
     const poleR = new THREE.Vector3(1, longGun ? -1.4 + 1.1 * sm.aim : -1.4, 0.5).applyQuaternion(root.quaternion);
     twoBoneIK(B.upperArmR, B.forearmR, B.handR, gripR, poleR);
@@ -444,9 +447,10 @@ export class Character {
       this.weaponHolder.localToWorld(left);
       poleL = new THREE.Vector3(-0.5, -1.4, 0.1).applyQuaternion(root.quaternion);
     } else {
-      // free left arm hangs relaxed beside the hip
-      left = this.model.localToWorld(this._boneModelPos('upperArmL').add(new THREE.Vector3(-2.2, -22, cls === 'knife' ? -3 : 0)));
-      poleL = new THREE.Vector3(-0.4, 0, 1).applyQuaternion(root.quaternion);
+      // free left arm hangs naturally at the side, elbow slightly bent behind
+      const sh = this._boneModelPos('upperArmL');
+      left = this.model.localToWorld(sh.clone().add(new THREE.Vector3(-0.8, -24, -2.5)));
+      poleL = new THREE.Vector3(-0.15, -0.2, 1).applyQuaternion(root.quaternion);
     }
     twoBoneIK(B.upperArmL, B.forearmL, B.handL, left, poleL);
   }
