@@ -538,6 +538,7 @@ export class GameClient {
     const def = WEAPONS[ps.active];
     let sens = app.settings.sensitivity * 0.022 * DEG;
     if (def?.scope && ps.w.scope > 0) sens *= app.settings.zoomSensitivity * (def.scope[ps.w.scope - 1] / 90);
+    else if (def?.ads && ps.w.ads) sens *= app.settings.zoomSensitivity * (def.ads.fov / 90);
     if (!app.uiBlocking() || app.input.touch) {
       this.yaw = wrapAngle(this.yaw - dx * sens);
       this.pitch = clamp(this.pitch - dy * sens * (app.settings.invertY ? -1 : 1), -89 * DEG, 89 * DEG);
@@ -652,7 +653,9 @@ export class GameClient {
     // zoom
     const def = WEAPONS[ps.active];
     const scoped = ps.alive && def?.scope && ps.w.scope > 0;
-    app.renderer.applyZoom(scoped ? def.scope[ps.w.scope - 1] : 1);
+    const ads = ps.alive && def?.ads && ps.w.ads;
+    this.adsFov = damp(this.adsFov || 90, ads ? def.ads.fov : app.settings.fov, 14, dt);
+    app.renderer.applyZoom(scoped ? def.scope[ps.w.scope - 1] : (Math.abs(this.adsFov - app.settings.fov) > 0.3 ? this.adsFov : 1));
 
     // viewmodel
     const vm = app.viewmodel;
@@ -660,7 +663,7 @@ export class GameClient {
     if (vm.t.reloadDur > 0 && ps.w.reloadEnd === 0) vm.cancelReload();
     vm.update(dt, {
       speed: Math.hypot(ps.vel.x, ps.vel.z), onGround: ps.onGround, duck: ps.duck, lookDX: app.input.lookDX, lookDY: app.input.lookDY,
-      scoped, planting: ps.w.plantStart >= 0, defusing: this.bomb.defuser === this.num, primed: ps.w.nade === 1, visible: ps.alive,
+      scoped, ads: !!ads, planting: ps.w.plantStart >= 0, defusing: this.bomb.defuser === this.num, primed: ps.w.nade === 1, visible: ps.alive,
     });
 
     // bomb visuals
@@ -775,7 +778,7 @@ export class GameClient {
     // contextual hint
     const smoke = app.effects.smokeCover(app.renderer.camera.position.x, app.renderer.camera.position.y, app.renderer.camera.position.z, this._now());
     hud.frame(dt, {
-      scoped: ps.alive && def?.scope && ps.w.scope > 0, hideCrosshair: !ps.alive || (def?.cls === 'sniper') || app.uiBlocking(),
+      scoped: ps.alive && def?.scope && ps.w.scope > 0, hideCrosshair: !ps.alive || (def?.cls === 'sniper') || (def?.ads && ps.w.ads) || app.uiBlocking(),
       smoke: smoke * 0.95, lowHp: ps.alive && ps.hp <= 25, speed: ps.alive ? Math.hypot(ps.vel.x, ps.vel.z) : undefined,
     });
     // buy menu

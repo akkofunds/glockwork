@@ -394,7 +394,8 @@ export class Character {
     const head = this._boneModelPos('head');
     const eye = head.clone().add(new THREE.Vector3(0, 3.0, -3.0));
     const aimQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, 0, 'YXZ'));
-    const relaxQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.45 - 0.26, 0.12, 0, 'YXZ'));
+    // relaxed = hip-fire ready: gun level and pointing where you look, held lower at the chest
+    const relaxQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.9 - 0.04, 0.05, 0, 'YXZ'));
     const pos = new THREE.Vector3(), q = new THREE.Quaternion();
     if (longGun) {
       const rear = meta.rear ?? 11, top = meta.top ?? 3.5;
@@ -402,7 +403,7 @@ export class Character {
       const buttA = new THREE.Vector3(shoulderR.x - 2.0, eye.y - top - 2.0, shoulderR.z - 0.5);
       const posA = buttA.clone().add(new THREE.Vector3(0, 0, -rear).applyQuaternion(aimQ));
       // relaxed (low/patrol ready): butt tucked under the armpit, muzzle forward and slightly down
-      const buttR = new THREE.Vector3(shoulderR.x - 3.0, shoulderR.y - 7.0, shoulderR.z - 2.5);
+      const buttR = new THREE.Vector3(shoulderR.x - 2.6, shoulderR.y - 5.5, shoulderR.z - 2.0);
       const posR = buttR.clone().add(new THREE.Vector3(0, 0, -rear).applyQuaternion(relaxQ));
       pos.lerpVectors(posR, posA, sm.aim);
       q.slerpQuaternions(relaxQ, aimQ, sm.aim);
@@ -410,9 +411,9 @@ export class Character {
       const top = meta.top ?? 2.8;
       // aimed: arms extended, sights just below the eye line; relaxed: low ready at chest
       const posA = new THREE.Vector3(1.0, eye.y - top - 2.2, eye.z - 18).sub(eye).applyQuaternion(aimQ).add(eye);
-      const posR = new THREE.Vector3(2.0, shoulderR.y - 12, shoulderR.z - 12);
+      const posR = new THREE.Vector3(2.0, shoulderR.y - 9, shoulderR.z - 14);
       pos.lerpVectors(posR, posA, sm.aim);
-      const pr = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.4 - 0.45, 0, 0, 'YXZ'));
+      const pr = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.9 - 0.06, 0, 0, 'YXZ'));
       q.slerpQuaternions(pr, aimQ, sm.aim);
     } else if (cls === 'knife') {
       pos.set(shoulderR.x - 1, shoulderR.y - 17, shoulderR.z - 11);

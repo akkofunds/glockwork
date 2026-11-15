@@ -15,9 +15,9 @@ export const SLOT_LABEL = { map: 'Map', soldier: 'Soldier', ak47: 'AK-47', awp: 
 const DEFAULT_URL = { ak47: 'assets/models/ak47.glb', awp: 'assets/models/awp.glb', glock17: 'assets/models/glock17.glb', knife: 'assets/models/knife.glb' };
 // Calibrated orientation for the bundled files: yaw (deg) so the muzzle points -Z, grip anchor [fromRear, fromBottom]
 const BUNDLED_CAL = {
-  ak47: { yaw: 90, grip: [0.33, 0.6], left: [0.66, 0.62] },
-  glock17: { yaw: 90, grip: [0.1, 0.36], left: [0.1, 0.3], length: 13.5 },
-  awp: { yaw: 180, grip: [0.22, 0.3], left: [0.5, 0.4] },
+  ak47: { yaw: 90, grip: [0.33, 0.66], left: [0.66, 0.6] },
+  glock17: { yaw: 90, grip: [0.1, 0.56], left: [0.1, 0.3], length: 13.5 },
+  awp: { yaw: 180, grip: [0.22, 0.48], left: [0.48, 0.36] },
   knife: { yaw: -90, grip: [0.16, 0.5], left: null },
 };
 export const DEFAULT_TUNE = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 };

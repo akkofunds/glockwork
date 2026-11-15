@@ -6,7 +6,7 @@ export const BINDS = {
   Space: 'jump', ShiftLeft: 'walk', ShiftRight: 'walk', ControlLeft: 'duck', ControlRight: 'duck', KeyC: 'duck',
   KeyR: 'reload', KeyE: 'use', KeyG: 'drop', KeyF: 'inspect', KeyB: 'buy', Tab: 'scores', KeyQ: 'lastweapon',
   Digit1: 'slot1', Digit2: 'slot2', Digit3: 'slot3', Digit4: 'slot4', Digit5: 'slot5', Escape: 'menu', KeyM: 'menu',
-  KeyT: 'chat', KeyY: 'chat', KeyU: 'teamchat',
+  KeyT: 'chat', KeyY: 'chat', KeyU: 'teamchat', KeyV: 'firemode',
 };
 
 export class Input {
@@ -112,6 +112,7 @@ export class Input {
     if (h.has('use') || (t && t.use)) b |= BTN.USE;
     if (h.has('inspect')) b |= BTN.INSPECT;
     if (h.has('drop') || (t && t.drop)) b |= BTN.DROP;
+    if (h.has('firemode')) b |= BTN.MODE;
     // hold Space / the jump button to auto-hop; the wheel and quick taps use a 50 ms landing buffer
     if (h.has('jump') || (t && t.jumpHeld) || performance.now() - this.jumpAt <= 50 || (t && performance.now() - t.jumpAt <= 50)) b |= BTN.JUMP;
     return b;

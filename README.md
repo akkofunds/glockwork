@@ -102,7 +102,9 @@ With no manifest, the game uses the original built-in *Dunewatch* arena and a bu
 | Jump | Space or mouse wheel (50 ms landing buffer for bhop) |
 | Walk | Shift |
 | Crouch | Ctrl or C |
-| Fire / alt-fire | Mouse 1 / Mouse 2 |
+| Fire | Mouse 1 |
+| Aim down sights (AK-47, Glock-17) / AWP scope / knife stab | Mouse 2 (hold to aim) |
+| Glock burst mode | V |
 | Reload | R |
 | Use / defuse / swap weapon on the ground | E |
 | Drop | G |

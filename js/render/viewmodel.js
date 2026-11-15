@@ -15,9 +15,11 @@ const BASE = {
   c4: { p: [0.8, -7.2, -14], r: [0.5, 0, 0] },
 };
 
+// Realistic inspect: tilt to show the left side, roll over to show the right side, settle back.
+// (amplitude is reduced further for heavy rifles; only the knife flips/spins)
 const INSPECT_GUN = [
-  [0, 0, 0, 0, 0, 0, 0], [0.45, 0.12, 0.95, 0.55, -2.6, 2.2, 2.2], [1.55, 0.18, 1.0, 0.6, -2.6, 2.4, 2.2],
-  [2.05, -0.12, -0.75, -0.65, -1.4, 1.8, 2.0], [3.0, -0.1, -0.8, -0.7, -1.4, 1.8, 2.0], [3.5, 0, 0, 0, 0, 0, 0],
+  [0, 0, 0, 0, 0, 0, 0], [0.45, 0.08, 0.5, 0.42, -1.6, 1.4, 1.2], [1.4, 0.1, 0.55, 0.46, -1.6, 1.5, 1.2],
+  [1.95, -0.04, -0.32, -0.5, -0.9, 1.1, 1.0], [2.8, -0.04, -0.35, -0.54, -0.9, 1.1, 1.0], [3.3, 0, 0, 0, 0, 0, 0],
 ];
 const TAU = Math.PI * 2;
 const INSPECT_KNIFE = [
@@ -240,7 +242,8 @@ export class ViewModel {
       if (t.inspect >= keys[keys.length - 1][0]) t.inspect = -1;
       else {
         const k = sampleKeys(keys, t.inspect, this._k);
-        rx += k[0]; ry += k[1]; rz += k[2]; px += k[3]; py += k[4]; pz += k[5];
+        const amp = cls === 'sniper' ? 0.55 : 1;
+        rx += k[0] * amp; ry += k[1] * amp; rz += k[2] * amp; px += k[3] * amp; py += k[4] * amp; pz += k[5] * amp;
       }
     }
     // knife attacks
@@ -270,6 +273,17 @@ export class ViewModel {
     if (cls === 'c4' && st.planting) { py -= 1.5 + Math.abs(Math.sin(performance.now() * 0.012)) * 0.4; pz += 1; }
     if (st.defusing) { py -= 4; rx -= 0.4; }
 
+    // aim down sights: bring the sight line onto the screen centre
+    this.adsT = damp(this.adsT || 0, st.ads ? 1 : 0, st.ads ? 16 : 12, dt);
+    if (this.adsT > 0.001) {
+      const m = this.weapon.userData.meta || {};
+      const top = m.top ?? 3, rear = m.rear ?? 10;
+      const a = this.adsT;
+      const ax = 0, ay = -(top - (cls === 'pistol' ? 0.12 : 0.3)), az = cls === 'pistol' ? -14 : -rear - 1.2;
+      px += (ax - px) * a; py += (ay - py) * a; pz += (az - pz) * a;
+      rx += (0 + t.kickRot * 0.3 - rx) * a; ry += (0 - ry) * a; rz += (0 - rz) * a;
+      if (t.inspect >= 0) t.inspect = -1;
+    }
     this.holder.position.set(px, py, pz);
     this.holder.rotation.set(rx, ry, rz, 'YXZ');
     // muzzle flash

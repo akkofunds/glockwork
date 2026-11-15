@@ -4,7 +4,7 @@ import { MOVE, DT } from '../config.js';
 
 export const BTN = {
   FWD: 1, BACK: 2, LEFT: 4, RIGHT: 8, JUMP: 16, DUCK: 32, WALK: 64,
-  ATTACK: 128, ATTACK2: 256, RELOAD: 512, USE: 1024, DROP: 2048, INSPECT: 4096,
+  ATTACK: 128, ATTACK2: 256, RELOAD: 512, USE: 1024, DROP: 2048, INSPECT: 4096, MODE: 8192,
 };
 
 export const hullHeight = (duck) => MOVE.standHeight - (MOVE.standHeight - MOVE.crouchHeight) * duck;

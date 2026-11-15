@@ -21,7 +21,7 @@ export function freshWeaponState() {
   return {
     drawEnd: 0, reloadEnd: 0, nextAttack: 0, nextAttack2: 0, recoil: 0, inacc: 0, lastShot: -10,
     burst: 0, burstNext: 0, burstMode: false, scope: 0, rezoom: 0, shotSeq: 0,
-    plantStart: -1, nade: 0, nadeUnder: false, pendingSwitch: 0,
+    plantStart: -1, nade: 0, nadeUnder: false, pendingSwitch: 0, ads: 0,
   };
 }
 
@@ -62,6 +62,7 @@ export function activeSlotData(ps) {
 export function maxSpeedFor(ps) {
   const d = WEAPONS[ps.active] || WEAPONS.knife;
   if (d.scopedSpeed && ps.w.scope > 0) return d.scopedSpeed;
+  if (d.ads && ps.w.ads) return d.speed * d.ads.speed;
   return d.speed;
 }
 
@@ -71,7 +72,7 @@ export function switchTo(ps, id) {
   ps.active = id;
   const w = ps.w;
   w.drawEnd = ps.time + (WEAPONS[id].drawTime || 0.6);
-  w.reloadEnd = 0; w.scope = 0; w.rezoom = 0; w.burst = 0; w.plantStart = -1; w.nade = 0; w.pendingSwitch = 0;
+  w.reloadEnd = 0; w.scope = 0; w.rezoom = 0; w.burst = 0; w.plantStart = -1; w.nade = 0; w.pendingSwitch = 0; w.ads = 0;
   w.recoil = 0; w.inacc = 0;
 }
 
@@ -96,6 +97,7 @@ export function currentInaccuracy(ps) {
   if (d.stationary && ps.w.scope > 0 && speed > d.stationary) move = Math.max(move, ia.move * 0.35 * clamp(speed / 60, 0, 1));
   let air = 0;
   if (!ps.onGround) air = (ia.airSlow !== undefined && Math.abs(ps.vel.y) < 60) ? ia.airSlow : ia.air;
+  if (d.ads && ps.w.ads) { base *= d.ads.acc; move *= 0.75; }
   return base + move + air + ps.w.inacc;
 }
 
@@ -145,7 +147,7 @@ function fireGun(ps, d, slot, ctx) {
 function startReload(ps, d, slot) {
   if (!slot || slot.mag >= d.mag || slot.res <= 0 || ps.w.reloadEnd > 0) return false;
   ps.w.reloadEnd = ps.time + d.reloadTime;
-  ps.w.scope = 0; ps.w.rezoom = 0; ps.w.burst = 0;
+  ps.w.scope = 0; ps.w.rezoom = 0; ps.w.burst = 0; ps.w.ads = 0;
   return true;
 }
 
@@ -230,14 +232,15 @@ function updateWeapon(ps, cmd, pressed, ctx) {
     default: {
       if (!slot) break;
       if ((pressed & BTN.RELOAD)) startReload(ps, d, slot);
-      if ((pressed & BTN.ATTACK2) && w.reloadEnd === 0) {
-        if (d.scope) {
-          w.scope = (w.scope + 1) % (d.scope.length + 1); w.rezoom = 0;
-          ctx.onSound && ctx.onSound(ps, 'zoom');
-        } else if (d.burst) {
-          w.burstMode = !w.burstMode;
-          ctx.onSound && ctx.onSound(ps, 'mode');
-        }
+      if ((pressed & BTN.ATTACK2) && w.reloadEnd === 0 && d.scope) {
+        w.scope = (w.scope + 1) % (d.scope.length + 1); w.rezoom = 0;
+        ctx.onSound && ctx.onSound(ps, 'zoom');
+      }
+      // hold right-click to aim down sights (AK-47, Glock-17)
+      if (d.ads) w.ads = (b & BTN.ATTACK2) && w.reloadEnd === 0 ? 1 : 0;
+      if ((pressed & BTN.MODE) && d.burst) {
+        w.burstMode = !w.burstMode;
+        ctx.onSound && ctx.onSound(ps, 'mode');
       }
       // burst continuation
       if (w.burst > 0 && t >= w.burstNext) {

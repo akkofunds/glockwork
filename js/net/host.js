@@ -971,7 +971,7 @@ export class Host {
       if (ps.alive) f |= PF.ALIVE;
       if (ps.onGround) f |= PF.GROUND;
       if (p.lastButtons & BTN.WALK) f |= PF.WALK;
-      if (ps.w.scope > 0) f |= PF.SCOPED;
+      if (ps.w.scope > 0 || ps.w.ads) f |= PF.SCOPED;
       if (ps.w.plantStart >= 0) f |= PF.PLANTING;
       if (bomb.defuser === p.num) f |= PF.DEFUSING;
       if (ps.w.reloadEnd > 0) f |= PF.RELOADING;

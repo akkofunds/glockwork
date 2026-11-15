@@ -1,7 +1,7 @@
 // Flashpoint — core gameplay constants. All distances are in game units (1u ≈ 1 inch), time in seconds.
 
 // Bump on every release that changes gameplay/netcode: mismatched clients can't join each other.
-export const GAME_VERSION = 5;
+export const GAME_VERSION = 6;
 
 export const TICK_RATE = 64;
 export const DT = 1 / TICK_RATE;
@@ -113,14 +113,14 @@ export const WEAPONS = {
   glock: {
     name: 'Glock-17', slot: 2, cls: 'pistol', price: 200, team: 0, reward: 300, speed: 240,
     damage: 30, armorPen: 0.47, rangeMod: 0.85, range: 4096, rpm: 400, mag: 20, reserve: 120, reloadTime: 2.2, drawTime: 0.6,
-    auto: false, burst: true, pen: 8,
+    auto: false, burst: true, pen: 8, ads: { fov: 74, speed: 0.8, acc: 0.5 },
     inacc: { stand: 0.0085, crouch: 0.0065, move: 0.022, air: 0.14, fire: 0.028, max: 0.07, recovery: 0.28 },
     pattern: 'glock', recover: 6, model: 'glock17', sound: 'pistol',
   },
   ak47: {
     name: 'AK-47', slot: 1, cls: 'rifle', price: 2700, team: 0, reward: 300, speed: 215,
     damage: 36, armorPen: 0.775, rangeMod: 0.98, range: 8192, rpm: 600, mag: 30, reserve: 90, reloadTime: 2.45, drawTime: 1.0,
-    auto: true, pen: 26,
+    auto: true, pen: 26, ads: { fov: 66, speed: 0.78, acc: 0.5 },
     inacc: { stand: 0.0042, crouch: 0.003, move: 0.11, air: 0.36, fire: 0.0072, max: 0.065, recovery: 0.36 },
     pattern: 'ak', recover: 7.5, model: 'ak47', sound: 'rifle',
   },

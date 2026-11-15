@@ -328,9 +328,9 @@ export class Menus {
   _controls(body) {
     const rows = {};
     for (const [code, a] of Object.entries(BINDS)) (rows[a] ||= []).push(code.replace(/^Key|^Digit/, '').replace('Left', ' L').replace('Right', ' R'));
-    const names = { fwd: 'Forward', back: 'Back', left: 'Strafe left', right: 'Strafe right', jump: 'Jump (also mouse wheel)', walk: 'Walk (silent)', duck: 'Crouch', reload: 'Reload', use: 'Use / defuse / pick up', drop: 'Drop weapon / bomb', inspect: 'Inspect weapon', buy: 'Buy menu', scores: 'Scoreboard', lastweapon: 'Last weapon', slot1: 'Primary', slot2: 'Pistol', slot3: 'Knife', slot4: 'Grenades (cycle)', slot5: 'C4', menu: 'Menu', chat: 'Chat (all)', teamchat: 'Chat (team)' };
+    const names = { fwd: 'Forward', back: 'Back', left: 'Strafe left', right: 'Strafe right', jump: 'Jump (also mouse wheel)', walk: 'Walk (silent)', duck: 'Crouch', reload: 'Reload', use: 'Use / defuse / pick up', drop: 'Drop weapon / bomb', inspect: 'Inspect weapon', buy: 'Buy menu', scores: 'Scoreboard', lastweapon: 'Last weapon', slot1: 'Primary', slot2: 'Pistol', slot3: 'Knife', slot4: 'Grenades (cycle)', slot5: 'C4', menu: 'Menu', chat: 'Chat (all)', teamchat: 'Chat (team)', firemode: 'Glock burst mode' };
     body.innerHTML = `<h2>Controls</h2><table class="keys">${Object.entries(rows).map(([a, ks]) => `<tr><td>${names[a] || a}</td><td>${ks.map((k) => `<kbd>${h(k)}</kbd>`).join(' ')}</td></tr>`).join('')}
-      <tr><td>Fire / Alt-fire (scope, Glock burst, knife stab)</td><td><kbd>Mouse 1</kbd> <kbd>Mouse 2</kbd></td></tr></table>
+      <tr><td>Fire / Aim down sights (hold) · AWP scope · knife stab</td><td><kbd>Mouse 1</kbd> <kbd>Mouse 2</kbd></td></tr></table>
       <p class="hint">Touch devices get dual-thumb controls automatically: left side moves, right side looks, the FIRE button also aims while you drag it.</p>`;
   }
 
